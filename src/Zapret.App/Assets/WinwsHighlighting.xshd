@@ -1,0 +1,92 @@
+<?xml version="1.0"?>
+<SyntaxDefinition name="winws" xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Flag"    foreground="#3B9EFF" />
+  <Color name="New"     foreground="#E5B567" fontWeight="bold" />
+  <Color name="Method"  foreground="#C586C0" />
+  <Color name="Value"   foreground="#4EC9B0" />
+  <Color name="File"    foreground="#CE9178" />
+  <Color name="String"  foreground="#98C379" />
+  <Color name="Number"  foreground="#B5CEA8" />
+  <Color name="Comment" foreground="#7A828E" fontStyle="italic" />
+
+  <RuleSet ignoreCase="true">
+    <Span color="Comment" begin="(#|::)" />
+
+    <Span color="String">
+      <Begin>"</Begin>
+      <End>"</End>
+    </Span>
+
+    <Rule color="New">--new</Rule>
+    <Rule color="Flag">--[a-z0-9\-]+</Rule>
+
+    <Keywords color="Method">
+      <Word>fake</Word>
+      <Word>multisplit</Word>
+      <Word>multidisorder</Word>
+      <Word>fakedsplit</Word>
+      <Word>fakeddisorder</Word>
+      <Word>hostfakesplit</Word>
+      <Word>tcpseg</Word>
+      <Word>oob</Word>
+      <Word>udplen</Word>
+      <Word>syndata</Word>
+      <Word>rst</Word>
+      <Word>synack</Word>
+      <Word>synack_split</Word>
+      <Word>wsize</Word>
+      <Word>wssize</Word>
+      <Word>tls_client_hello_clone</Word>
+      <Word>http_domcase</Word>
+      <Word>http_hostcase</Word>
+      <Word>http_methodeol</Word>
+      <Word>http_unixeol</Word>
+      <Word>pktmod</Word>
+      <Word>drop</Word>
+      <Word>send</Word>
+      <Word>dht_dn</Word>
+    </Keywords>
+
+    <Keywords color="Value">
+      <Word>tls</Word>
+      <Word>http</Word>
+      <Word>quic</Word>
+      <Word>discord</Word>
+      <Word>stun</Word>
+      <Word>dns</Word>
+      <Word>dtls</Word>
+      <Word>wireguard</Word>
+      <Word>xmpp</Word>
+      <Word>mtproto</Word>
+      <Word>bt</Word>
+      <Word>utp_bt</Word>
+      <Word>tls_client_hello</Word>
+      <Word>tls_server_hello</Word>
+      <Word>http_req</Word>
+      <Word>http_reply</Word>
+      <Word>quic_initial</Word>
+      <Word>discord_ip_discovery</Word>
+      <Word>dns_query</Word>
+      <Word>dns_response</Word>
+      <Word>dtls_client_hello</Word>
+      <Word>wireguard_initiation</Word>
+      <Word>mtproto_initial</Word>
+      <Word>bt_handshake</Word>
+      <Word>dht</Word>
+      <Word>midsld</Word>
+      <Word>sniext</Word>
+      <Word>host</Word>
+      <Word>endhost</Word>
+      <Word>method</Word>
+      <Word>rnd</Word>
+      <Word>rndsni</Word>
+      <Word>dupsid</Word>
+      <Word>padencap</Word>
+    </Keywords>
+
+    <Rule color="File">@[^\s"]+</Rule>
+    <Rule color="File">%~dp0[^\s"]*</Rule>
+
+    <Rule color="Number">\b[0-9]+\b</Rule>
+  </RuleSet>
+</SyntaxDefinition>

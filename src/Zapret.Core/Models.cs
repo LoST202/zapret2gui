@@ -15,11 +15,24 @@ public sealed record Strategy
     public bool AutoHostlist { get; init; }
 }
 
+public sealed class Profile
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string StrategyId { get; set; } = "";
+}
+
 public sealed class AppConfig
 {
     public string Theme { get; set; } = "dark";
     public string? CurrentStrategyId { get; set; }
     public bool StartMinimized { get; set; }
+    public bool AutoConnect { get; set; }
+    public bool MaskInfo { get; set; }
+
+    public List<Profile> Profiles { get; set; } = new();
+
+    public List<string> DashboardCards { get; set; } = new() { "lists", "actions", "profiles" };
 
     public string AccentColor { get; set; } = "system";
 
@@ -37,6 +50,7 @@ public sealed class AppConfig
 [JsonSerializable(typeof(AppConfig))]
 [JsonSerializable(typeof(List<Strategy>))]
 [JsonSerializable(typeof(Strategy))]
+[JsonSerializable(typeof(Profile))]
 public partial class ZapretJson : JsonSerializerContext
 {
 }

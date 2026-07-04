@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\icon.ico" />
+    <EmbeddedResource Include="Assets\WinwsHighlighting.xshd" />
   </ItemGroup>
 
   <!-- Ship default strategies/state next to the exe so a fresh install works out of the box.
@@ -42,6 +43,7 @@
   <ItemGroup>
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
     <!-- Language-independent service queries for Diagnostics (avoids parsing localized `sc` output). -->
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
   </ItemGroup>

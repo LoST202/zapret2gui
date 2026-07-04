@@ -7,6 +7,8 @@ public sealed class WinwsRunner : IDisposable
     private readonly AppPaths _paths;
     private readonly object _gate = new();
     private Process? _process;
+    private TimeSpan _lastCpuTotal;
+    private long _lastCpuTick;
 
     public WinwsRunner(AppPaths paths) => _paths = paths;
 
@@ -22,6 +24,9 @@ public sealed class WinwsRunner : IDisposable
     public event EventHandler? StateChanged;
 
     public event EventHandler<string>? Output;
+
+    /// <summary>Raised when the engine exits on its own (crash), not via <see cref="StopAsync"/>. Carries the strategy that was running.</summary>
+    public event EventHandler<Strategy>? Crashed;
 
     public async Task StartAsync(Strategy strategy, CancellationToken ct = default)
     {
@@ -88,7 +93,43 @@ public sealed class WinwsRunner : IDisposable
         }
 
         StartedAt = DateTime.Now;
+        _lastCpuTick = 0;
+        _lastCpuTotal = TimeSpan.Zero;
         StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Working-set bytes and CPU% of the engine process since the previous call. (0, 0) when not running.</summary>
+    public (long RamBytes, double CpuPercent) SampleUsage()
+    {
+        lock (_gate)
+        {
+            var p = _process;
+            if (p is null)
+                return (0, 0);
+            try
+            {
+                if (p.HasExited)
+                    return (0, 0);
+                p.Refresh();
+                var ram = p.WorkingSet64;
+                var tick = Environment.TickCount64;
+                var cpu = p.TotalProcessorTime;
+                double pct = 0;
+                if (_lastCpuTick != 0)
+                {
+                    var dt = tick - _lastCpuTick;
+                    if (dt > 0)
+                    {
+                        pct = (cpu - _lastCpuTotal).TotalMilliseconds / (dt * Environment.ProcessorCount) * 100.0;
+                        pct = Math.Clamp(pct, 0, 100);
+                    }
+                }
+                _lastCpuTick = tick;
+                _lastCpuTotal = cpu;
+                return (ram, pct);
+            }
+            catch { return (0, 0); }
+        }
     }
 
     public async Task StopAsync(CancellationToken ct = default)
@@ -125,10 +166,13 @@ public sealed class WinwsRunner : IDisposable
 
     private void OnExited(object? sender, EventArgs e)
     {
-        lock (_gate) { Current = null; }
+        Strategy? crashed;
+        lock (_gate) { crashed = Current; Current = null; }
         StartedAt = null;
         StateChanged?.Invoke(this, EventArgs.Empty);
         _ = RemoveDriverAsync();
+        if (crashed is not null)
+            Crashed?.Invoke(this, crashed);
     }
 
     private static void KillStrayEngines()

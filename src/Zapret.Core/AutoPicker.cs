@@ -52,6 +52,13 @@ public sealed class AutoPicker
 
             await Task.Delay(_settleMs, ct).ConfigureAwait(false);
 
+            // If the engine died on start-up, this strategy can't be the working one.
+            if (!_runner.IsRunning)
+            {
+                progress?.Report(new AutoPickProgress(AutoPickPhase.Failed, s.Label, i, total, null));
+                continue;
+            }
+
             var ok = await ProbeAsync(ct).ConfigureAwait(false);
             progress?.Report(new AutoPickProgress(
                 ok ? AutoPickPhase.Passed : AutoPickPhase.Failed, s.Label, i, total, ok ? s : null));
@@ -71,8 +78,8 @@ public sealed class AutoPicker
     {
         using var handler = new SocketsHttpHandler
         {
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 5,
+            AllowAutoRedirect = false,
+            UseProxy = false,
             ConnectTimeout = TimeSpan.FromMilliseconds(_timeoutMs),
         };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(_timeoutMs) };
@@ -86,8 +93,8 @@ public sealed class AutoPicker
             {
                 using var resp = await http.GetAsync(target, HttpCompletionOption.ResponseHeadersRead, probeCts.Token)
                     .ConfigureAwait(false);
-                if (resp.IsSuccessStatusCode)
-                    return true;
+                // Any HTTP response means the TLS handshake to the blocked host went through → bypass works.
+                return true;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

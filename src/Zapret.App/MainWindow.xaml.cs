@@ -1,12 +1,15 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
 using System.Windows.Threading;
+using Hardcodet.Wpf.TaskbarNotification;
 using Zapret.Core;
 
 namespace Zapret.App;
@@ -19,9 +22,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private static readonly Brush FailBrush = Freeze(0x9A, 0xA0, 0xA6);
     private static readonly Brush ErrorBrush = Freeze(0xE8, 0x5C, 0x5C);
     private static readonly Brush WarnBrush = Freeze(0xE8, 0xB1, 0x3B);
-    private static readonly Brush OkBadgeBg = FreezeA(0x2E, 0x3F, 0xB9, 0x50);
-    private static readonly Brush ErrBadgeBg = FreezeA(0x2E, 0xE8, 0x5C, 0x5C);
-    private static readonly Brush NoBadgeBg = Brushes.Transparent;
+    private static readonly ImageSource TrayOn = MakeTrayIcon(Color.FromRgb(0x3F, 0xB9, 0x50));
+    private static readonly ImageSource TrayOff = MakeTrayIcon(Color.FromRgb(0x8A, 0x90, 0x99));
 
     private readonly AppPaths _paths;
     private readonly AppState _state;
@@ -48,6 +50,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private readonly ObservableCollection<Strategy> _editStrategies = new();
     private bool _suppressEditorSelection;
 
+    private bool _wasRunning;
+    private int _crashCount;
+    private DateTime _lastCrash = DateTime.MinValue;
+    private bool _infoLoaded;
+    private bool _infoMasked;
+    private bool _sysLoading;
+    private SysNet? _sysCache;
+    private ObservableCollection<DashCardOption> _dashOpts = new();
+
     private const string AppVersion = "1.0.0";
 
     public MainWindow()
@@ -68,6 +79,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _runner = new WinwsRunner(_paths);
         _runner.StateChanged += (_, _) => Dispatcher.BeginInvoke(new Action(UpdateStatus));
         _runner.Output += (_, line) => Dispatcher.BeginInvoke(new Action(() => AppendLog(line)));
+        _runner.Crashed += (_, s) => Dispatcher.BeginInvoke(new Action(() => OnEngineCrashed(s)));
 
         ApplyTheme(_state.Config.Theme);
         ApplyFont();
@@ -87,6 +99,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         ThemeToggle.IsChecked = string.Equals(_state.Config.Theme, "light", StringComparison.OrdinalIgnoreCase);
         AutostartToggle.IsChecked = Autostart.IsEnabled();
         StartMinToggle.IsChecked = _state.Config.StartMinimized;
+        AutoConnectToggle.IsChecked = _state.Config.AutoConnect;
         FontCombo.ItemsSource = System.Windows.Media.Fonts.SystemFontFamilies
             .Select(f => f.Source).OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList();
         FontCombo.SelectedItem = string.IsNullOrWhiteSpace(_state.Config.FontFamily) ? "Segoe UI" : _state.Config.FontFamily;
@@ -116,6 +129,12 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         StrategyTests.ItemsSource = _testGroups;
         EditorList.ItemsSource = _editStrategies;
 
+        _infoMasked = _state.Config.MaskInfo;
+        ApplyInfoMask();
+        RebuildProfiles();
+        LayoutDashboardCards();
+        SetupStrategyEditor();
+
         UpdateStatus();
         ShowPage("dashboard");
 
@@ -130,6 +149,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 Hide();
                 MemoryTrimmer.Trim();
             }
+            if (_state.Config.AutoConnect && SelectedStrategy() is not null && !_runner.IsRunning)
+                _ = AutoConnectStartupAsync();
         };
     }
 
@@ -163,6 +184,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 }
                 AppendLog($"Запуск «{s.Label}»…");
                 await _runner.StartAsync(s);
+                _crashCount = 0;   // fresh manual start → fresh watchdog budget
             }
         }
         catch (Exception ex)
@@ -175,6 +197,70 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             StopSpinner();
             UpdateStatus();
         }
+    }
+
+    // ===== Watchdog + tray notifications =====
+
+    private async Task AutoConnectStartupAsync()
+    {
+        await ToggleAsync();
+        if (_runner.IsRunning && _state.Config.StartMinimized)
+            Notify("Zapret2 запущен", $"Обход включён · {_runner.Current?.Label}", BalloonIcon.Info);
+    }
+
+    private void OnEngineCrashed(Strategy s)
+    {
+        // StopAsync detaches the exit handler, so a user stop/switch never lands here -
+        // getting here means the engine died on its own. Don't fight an action in progress.
+        if (_busy)
+            return;
+
+        var now = DateTime.Now;
+        if ((now - _lastCrash).TotalSeconds > 60)
+            _crashCount = 0;   // isolated crash after a long stable run → fresh budget
+        _lastCrash = now;
+        _crashCount++;
+
+        AppendLog($"Движок неожиданно остановился «{s.Label}».");
+
+        if (_crashCount > 3)
+        {
+            Notify("Обход отключился", "Не удаётся восстановить — откройте «Диагностику».", BalloonIcon.Warning);
+            UpdateStatus();
+            return;
+        }
+
+        Notify("Обход отключился", $"Восстанавливаю «{s.Label}»…", BalloonIcon.Warning);
+        _ = RestartAfterCrashAsync(s);
+    }
+
+    private async Task RestartAfterCrashAsync(Strategy s)
+    {
+        _busy = true;
+        StartSpinner();
+        try
+        {
+            await Task.Delay(1000);
+            await _runner.StartAsync(s);
+            Notify("Обход восстановлен", $"«{s.Label}» снова активен.", BalloonIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            AppendLog("Не удалось восстановить обход: " + ex.Message);
+            Notify("Обход отключился", "Не удалось восстановить.", BalloonIcon.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StopSpinner();
+            UpdateStatus();
+        }
+    }
+
+    private void Notify(string title, string message, BalloonIcon icon)
+    {
+        try { Tray.ShowBalloonTip(title, message, icon); }
+        catch { /* balloon is best-effort */ }
     }
 
     private async void StrategyCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -203,6 +289,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             finally { _busy = false; StopSpinner(); }
         }
         UpdateStatus();
+        RebuildProfiles();
     }
 
     private void SelectStrategyById(string id)
@@ -565,8 +652,55 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         catch (Exception ex) { AppendLog("Не удалось создать список: " + ex.Message); }
     }
 
-    private void Update_Click(object sender, RoutedEventArgs e) =>
-        AppendLog("Обновление списков ещё не реализовано.");
+    // Updatable IP set, same source the original zapret uses.
+    private const string IpsetUpdateUrl =
+        "https://raw.githubusercontent.com/Flowseal/zapret-discord-youtube/main/.service/ipset-service.txt";
+
+    private async void Update_Click(object sender, RoutedEventArgs e)
+    {
+        var btn = sender as System.Windows.Controls.Control;
+        if (btn is not null) btn.IsEnabled = false;
+
+        ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Informational;
+        ListsInfoBar.Title = "Обновление списка IP…";
+        ListsInfoBar.Message = "Загружаю ipset-all.txt из репозитория Flowseal.";
+        ListsInfoBar.IsOpen = true;
+
+        var target = _paths.List("ipset-all.txt");
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("Zapret2/1.0");
+            var data = await http.GetByteArrayAsync(IpsetUpdateUrl);
+            if (data.Length == 0)
+                throw new Exception("получен пустой файл");
+
+            Directory.CreateDirectory(_paths.ListsDir);
+            var tmp = target + ".tmp";
+            await File.WriteAllBytesAsync(tmp, data);
+            File.Move(tmp, target, overwrite: true);
+
+            LoadListsPage();
+            UpdateListCounts();
+
+            var count = ListsManager.CountEntries(target);
+            ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Success;
+            ListsInfoBar.Title = "Список IP обновлён";
+            ListsInfoBar.Message = $"ipset-all.txt — {count:N0} записей. Применится при следующем подключении.";
+            AppendLog($"Список IP обновлён: {count} записей.");
+        }
+        catch (Exception ex)
+        {
+            ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Error;
+            ListsInfoBar.Title = "Не удалось обновить список";
+            ListsInfoBar.Message = ex.Message;
+            AppendLog("Обновление списка: " + ex.Message);
+        }
+        finally
+        {
+            if (btn is not null) btn.IsEnabled = true;
+        }
+    }
 
     private async void UpdateListCounts()
     {
@@ -743,6 +877,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _state.Save();
     }
 
+    private void AutoConnect_Toggle(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettings)
+            return;
+        _state.Config.AutoConnect = ((ToggleButton)sender).IsChecked == true;
+        _state.Save();
+    }
+
     private bool _navCollapsed;
 
     private void NavToggle_Click(object sender, RoutedEventArgs e)
@@ -754,7 +896,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void SetNavCollapsed(bool collapsed)
     {
         _navCollapsed = collapsed;
-        NavColumn.Width = new GridLength(collapsed ? 48 : 220);
+
+        // Smoothly slide the pane width (PowerToys-style) instead of snapping.
+        NavColumn.BeginAnimation(ColumnDefinition.WidthProperty, new GridLengthAnimation
+        {
+            From = NavColumn.Width,
+            To = new GridLength(collapsed ? 48 : 220),
+            Duration = TimeSpan.FromMilliseconds(200),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        });
 
         var labels = collapsed ? Visibility.Collapsed : Visibility.Visible;
         NavHomeLabel.Visibility = labels;
@@ -822,16 +972,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         RunTestButton.Content = "Отмена";
         TestTypeCombo.IsEnabled = false;
         _testGroups.Clear();
-        TestProgressPanel.Visibility = Visibility.Visible;
+        TestStatus.Visibility = Visibility.Visible;
         TestStatus.Text = "Подготовка…";
-        TestPercent.Text = "0%";
-        TestProgress.Value = 0;
 
         _testCts = new CancellationTokenSource();
         var ct = _testCts.Token;
 
         var wasRunning = _runner.IsRunning;
         var restoreTo = _runner.Current ?? SelectedStrategy();
+        var noProbe = new Progress<TestProgress>(_ => { });
 
         try
         {
@@ -840,17 +989,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             {
                 ct.ThrowIfCancellationRequested();
                 idx++;
-                var current = idx;
-                TestStatus.Text = $"Проверяю «{s.Label}» · {current}/{strategies.Count}";
-                TestProgress.Value = (double)(current - 1) / strategies.Count * 100;
-                TestPercent.Text = $"{(int)Math.Round((double)(current - 1) / strategies.Count * 100)}%";
-                var progress = new Progress<TestProgress>(p =>
-                {
-                    if (p.Total <= 0) return;
-                    var pct = (current - 1 + (double)p.Done / p.Total) / strategies.Count * 100;
-                    TestProgress.Value = pct;
-                    TestPercent.Text = $"{(int)Math.Round(pct)}%";
-                });
+                TestStatus.Text = $"Тестирую «{s.Label}» ({idx}/{strategies.Count})…";
 
                 bool started = true;
                 try { await _runner.StartAsync(s, ct); }
@@ -859,55 +998,22 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
                 if (!started)
                 {
-                    _testGroups.Add(new StrategyTestGroup(s.Label, "не запустилась", "", ErrorBrush,
-                        new ObservableCollection<SiteRow>()));
+                    _testGroups.Add(new StrategyTestGroup(s.Label, "не запустилась", ErrorBrush,
+                        new ObservableCollection<CheckRow>()));
                     continue;
                 }
 
                 await Task.Delay(2000, ct);
+                var results = dpiMode
+                    ? await DpiChecker.RunAsync(noProbe, ct)
+                    : await RestrictionTester.RunAsync(noProbe, ct);
 
-                ObservableCollection<SiteRow> rows;
-                int okCount, total;
-                string analytics;
-                if (dpiMode)
-                {
-                    var results = await DpiChecker.RunAsync(progress, ct);
-                    rows = new ObservableCollection<SiteRow>(results.Select(r => new SiteRow(
-                        r.Name,
-                        r.Ok ? new StatusCell("OK", OkBrush, OkBadgeBg, r.Detail)
-                             : new StatusCell("ERR", ErrorBrush, ErrBadgeBg, r.Detail),
-                        new StatusCell("—", FailBrush, NoBadgeBg),
-                        new StatusCell("—", FailBrush, NoBadgeBg),
-                        new StatusCell(r.Detail, r.Ok ? FailBrush : ErrorBrush, NoBadgeBg))));
-                    okCount = results.Count(r => r.Ok);
-                    total = results.Count;
-                    analytics = $"нет фриза: {okCount} · режется: {total - okCount}";
-                }
-                else
-                {
-                    var results = await RestrictionTester.RunAsync(progress, ct);
-                    rows = new ObservableCollection<SiteRow>(results.Select(a => new SiteRow(
-                        a.Name,
-                        BadgeCell(a.Http),
-                        BadgeCell(a.Tls12),
-                        BadgeCell(a.Tls13),
-                        PingCellVm(a.Ping))));
-
-                    bool Ok(ProbeCell? c) => c is { State: ProbeState.Ok };
-                    okCount = results.Count(a => a.IsSite ? (Ok(a.Tls13) || Ok(a.Tls12)) : Ok(a.Ping));
-                    total = results.Count;
-
-                    var sites = results.Where(a => a.IsSite).ToList();
-                    int hOk = sites.Count(a => Ok(a.Http)), hErr = sites.Count(a => a.Http is { State: ProbeState.Err });
-                    int tOk = sites.Count(a => Ok(a.Tls12) || Ok(a.Tls13));
-                    int tErr = sites.Count(a => !Ok(a.Tls12) && !Ok(a.Tls13));
-                    int pOk = results.Count(a => Ok(a.Ping)), pErr = results.Count(a => !Ok(a.Ping));
-                    analytics = $"HTTP {hOk}✓/{hErr}✗   ·   TLS {tOk}✓/{tErr}✗   ·   Пинг {pOk}✓/{pErr}✗";
-                }
-
-                var brush = okCount == total ? OkBrush : okCount == 0 ? ErrorBrush : WarnBrush;
+                var okCount = results.Count(r => r.Ok);
+                var rows = new ObservableCollection<CheckRow>(
+                    results.Select(r => new CheckRow(r.Ok ? OkBrush : ErrorBrush, r.Name, r.Detail)));
+                var brush = okCount == results.Count ? OkBrush : okCount == 0 ? ErrorBrush : WarnBrush;
                 _testGroups.Add(new StrategyTestGroup(
-                    s.Label, $"{okCount}/{total} доступно", analytics, brush, rows));
+                    s.Label, $"{okCount}/{results.Count} доступно", brush, rows));
             }
             TestStatus.Text = "Готово";
         }
@@ -987,6 +1093,80 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             EditorList.SelectedIndex = Math.Min(idx, _editStrategies.Count - 1);
     }
 
+    private void EditorExport_Click(object sender, RoutedEventArgs e)
+    {
+        var idx = EditorList.SelectedIndex;
+        if (idx < 0)
+            return;
+        ApplyEditorForm();
+        var s = _editStrategies[idx];
+
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Filter = "Стратегия Zapret2 (*.json)|*.json",
+            FileName = SafeFileName(s.Label) + ".json",
+        };
+        if (dlg.ShowDialog() != true)
+            return;
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(s, ZapretJson.Default.Strategy);
+            File.WriteAllText(dlg.FileName, json, new System.Text.UTF8Encoding(false));
+            AppendLog($"Стратегия «{s.Label}» экспортирована.");
+        }
+        catch (Exception ex) { AppendLog("Экспорт стратегии: " + ex.Message); }
+    }
+
+    private void EditorImport_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "Стратегия Zapret2 (*.json)|*.json|Все файлы (*.*)|*.*",
+        };
+        if (dlg.ShowDialog() != true)
+            return;
+        try
+        {
+            var json = File.ReadAllText(dlg.FileName);
+            var imported = new List<Strategy>();
+            if (json.TrimStart().StartsWith('['))
+            {
+                var list = System.Text.Json.JsonSerializer.Deserialize(json, ZapretJson.Default.ListStrategy);
+                if (list is not null) imported.AddRange(list);
+            }
+            else
+            {
+                var one = System.Text.Json.JsonSerializer.Deserialize(json, ZapretJson.Default.Strategy);
+                if (one is not null) imported.Add(one);
+            }
+
+            if (imported.Count == 0)
+            {
+                AppendLog("Импорт: стратегий не найдено.");
+                return;
+            }
+
+            Strategy? first = null;
+            foreach (var s in imported)
+            {
+                var added = s with { Id = GenStrategyId(s.Label) };
+                _editStrategies.Add(added);
+                first ??= added;
+            }
+            if (first is not null)
+                EditorList.SelectedItem = first;
+            AppendLog($"Импортировано стратегий: {imported.Count}. Нажмите «Сохранить», чтобы записать.");
+        }
+        catch (Exception ex) { AppendLog("Импорт стратегии: " + ex.Message); }
+    }
+
+    private static string SafeFileName(string? name)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var clean = new string((name ?? "").Select(c => invalid.Contains(c) ? '_' : c).ToArray()).Trim();
+        return clean.Length == 0 ? "strategy" : clean;
+    }
+
     private void EditorSave_Click(object sender, RoutedEventArgs e)
     {
         ApplyEditorForm();
@@ -1056,12 +1236,299 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
 
         foreach (var (key, panel) in _navPages)
-            panel.Visibility = key == tag ? Visibility.Visible : Visibility.Collapsed;
+        {
+            if (key == tag)
+            {
+                panel.Visibility = Visibility.Visible;
+                // Soft fade + slight rise so page switches feel alive.
+                panel.BeginAnimation(OpacityProperty,
+                    new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(180))
+                    { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+            }
+            else
+            {
+                panel.Visibility = Visibility.Collapsed;
+            }
+        }
 
         if (tag == "lists")
             LoadListsPage();
         else if (tag == "editor")
             LoadEditor();
+        else if (tag == "dashboard")
+            AnimateDashboardIn();
+        else if (tag == "diagnostics" && !_infoLoaded)
+            _ = LoadSysInfoAsync();
+    }
+
+    private async Task LoadSysInfoAsync(bool force = false)
+    {
+        if (_sysLoading)
+            return;
+        if (!force && _sysCache is not null)
+        {
+            PopulateSysInfo(_sysCache);
+            return;
+        }
+
+        _sysLoading = true;
+        RefreshInfoButton.IsEnabled = false;
+        NetRefreshButton.IsEnabled = false;
+        try
+        {
+            _sysCache = await SysNetInfo.CollectAsync().ConfigureAwait(true);
+            PopulateSysInfo(_sysCache);
+            _infoLoaded = true;
+        }
+        catch { }
+        finally
+        {
+            _sysLoading = false;
+            RefreshInfoButton.IsEnabled = true;
+            NetRefreshButton.IsEnabled = true;
+        }
+    }
+
+    private void PopulateSysInfo(SysNet info)
+    {
+        InfoPublicIp.Text = info.PublicIp;
+        InfoAsn.Text = info.Asn;
+        InfoIsp.Text = info.Isp;
+        InfoLocation.Text = info.Location;
+        InfoOs.Text = info.Os;
+        InfoCpu.Text = info.Cpu;
+        InfoRam.Text = info.Ram;
+        InfoMachine.Text = info.Machine;
+        InfoUptime.Text = info.Uptime;
+        InfoNetIp.Text = info.PublicIp;
+        InfoNetIsp.Text = info.Isp;
+        ApplyInfoMask();
+    }
+
+    private async void RefreshInfo_Click(object sender, RoutedEventArgs e) => await LoadSysInfoAsync(force: true);
+    private async void NetRefresh_Click(object sender, RoutedEventArgs e) => await LoadSysInfoAsync(force: true);
+
+    private void MaskInfo_Click(object sender, RoutedEventArgs e)
+    {
+        _infoMasked = !_infoMasked;
+        _state.Config.MaskInfo = _infoMasked;
+        _state.Save();
+        ApplyInfoMask();
+    }
+
+    // Blur the identifying fields so a screenshot can be shared without leaking IP / provider / hostname.
+    private void ApplyInfoMask()
+    {
+        var sensitive = new[] { InfoPublicIp, InfoAsn, InfoIsp, InfoLocation, InfoMachine, InfoNetIp, InfoNetIsp };
+        foreach (var tb in sensitive)
+            tb.Effect = _infoMasked ? new BlurEffect { Radius = 9 } : null;
+        MaskInfoButton.Content = _infoMasked ? "Показать" : "Скрыть";
+        NetMaskButton.Icon = new Wpf.Ui.Controls.SymbolIcon
+        {
+            Symbol = _infoMasked ? Wpf.Ui.Controls.SymbolRegular.Eye24 : Wpf.Ui.Controls.SymbolRegular.EyeOff24,
+        };
+    }
+
+    // ===== Сборный главный экран =====
+
+    private static readonly (string Key, string Title)[] DashWidgets =
+    {
+        ("lists", "Списки"),
+        ("actions", "Быстрые действия"),
+        ("profiles", "Профили"),
+        ("net", "Сеть"),
+    };
+
+    private Border? CardFor(string key) => key switch
+    {
+        "lists" => CardLists,
+        "actions" => CardActions,
+        "profiles" => CardProfiles,
+        "net" => CardNet,
+        _ => null,
+    };
+
+    private void LayoutDashboardCards()
+    {
+        var order = _state.Config.DashboardCards;
+        DashCards.Children.Clear();
+        foreach (var key in order)
+        {
+            var card = CardFor(key);
+            if (card is null)
+                continue;
+            card.Visibility = Visibility.Visible;
+            card.Opacity = 1;
+            DashCards.Children.Add(card);
+        }
+        if (order.Contains("net"))
+            _ = LoadSysInfoAsync();
+    }
+
+    private void DashCustomize_Click(object sender, RoutedEventArgs e)
+    {
+        _dashOpts = new ObservableCollection<DashCardOption>();
+        var order = _state.Config.DashboardCards;
+        foreach (var key in order)
+        {
+            var w = DashWidgets.FirstOrDefault(x => x.Key == key);
+            if (w.Key is not null)
+                _dashOpts.Add(new DashCardOption { Key = w.Key, Title = w.Title, Enabled = true });
+        }
+        foreach (var (key, title) in DashWidgets)
+            if (!order.Contains(key))
+                _dashOpts.Add(new DashCardOption { Key = key, Title = title, Enabled = false });
+
+        DashOptionsList.ItemsSource = _dashOpts;
+        ShowOverlay(DashCustomizePanel);
+    }
+
+    private void DashOptUp_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string key })
+        {
+            var i = IndexOfOpt(key);
+            if (i > 0) _dashOpts.Move(i, i - 1);
+        }
+    }
+
+    private void DashOptDown_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string key })
+        {
+            var i = IndexOfOpt(key);
+            if (i >= 0 && i < _dashOpts.Count - 1) _dashOpts.Move(i, i + 1);
+        }
+    }
+
+    private int IndexOfOpt(string key)
+    {
+        for (var i = 0; i < _dashOpts.Count; i++)
+            if (_dashOpts[i].Key == key) return i;
+        return -1;
+    }
+
+    private void DashCustomizeCancel_Click(object sender, RoutedEventArgs e) => HideOverlays();
+
+    private void DashCustomizeApply_Click(object sender, RoutedEventArgs e)
+    {
+        _state.Config.DashboardCards = _dashOpts.Where(o => o.Enabled).Select(o => o.Key).ToList();
+        _state.Save();
+        LayoutDashboardCards();
+        HideOverlays();
+    }
+
+    // Staggered reveal: each card fades up in turn for a lively, modern entrance.
+    private void AnimateDashboardIn()
+    {
+        var cards = new List<FrameworkElement> { HeroCard };
+        foreach (var child in DashCards.Children)
+            if (child is FrameworkElement fe)
+                cards.Add(fe);
+        var delay = 0;
+        foreach (var card in cards)
+        {
+            if (card is null) continue;
+            // Fresh per-instance transform: ScaleTransform (for hover) + TranslateTransform (for the rise).
+            var translate = new TranslateTransform(0, 6);
+            card.RenderTransformOrigin = new Point(0.5, 0.5);
+            card.RenderTransform = new TransformGroup { Children = { new ScaleTransform(1, 1), translate } };
+            card.Opacity = 0;
+
+            var begin = TimeSpan.FromMilliseconds(delay);
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            card.BeginAnimation(OpacityProperty,
+                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220)) { BeginTime = begin, EasingFunction = ease });
+            translate.BeginAnimation(TranslateTransform.YProperty,
+                new DoubleAnimation(6, 0, TimeSpan.FromMilliseconds(220)) { BeginTime = begin, EasingFunction = ease });
+            delay += 40;
+        }
+    }
+
+    private void NavToLists_Click(object sender, RoutedEventArgs e) => NavLists.IsChecked = true;
+    private void NavToEditor_Click(object sender, RoutedEventArgs e) => NavEditor.IsChecked = true;
+    private void NavToJournal_Click(object sender, RoutedEventArgs e) => NavJournal.IsChecked = true;
+    private void NavToDiag_Click(object sender, RoutedEventArgs e) => NavDiag.IsChecked = true;
+
+    // ===== Профили =====
+
+    private void RebuildProfiles()
+    {
+        var currentId = SelectedStrategy()?.Id ?? _state.Config.CurrentStrategyId;
+        var accent = AccentBrush();
+        var items = _state.Config.Profiles.Select(p => new ProfileVm
+        {
+            Id = p.Id,
+            Name = p.Name,
+            StrategyLabel = _catalog.ById(p.StrategyId)?.Label ?? "стратегия удалена",
+            Border = p.StrategyId == currentId ? accent : Brushes.Transparent,
+        }).ToList();
+
+        ProfilesList.ItemsSource = items;
+        ProfilesEmpty.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ProfileAdd_Click(object sender, RoutedEventArgs e)
+    {
+        var s = SelectedStrategy();
+        if (s is null)
+        {
+            Notify("Профили", "Сначала выберите стратегию.", BalloonIcon.Warning);
+            return;
+        }
+        ProfileNameBox.Text = "";
+        ProfileNameHint.Text = $"Сохранит стратегию «{s.Label}» под этим именем.";
+        ShowOverlay(ProfileNamePanel);
+        ProfileNameBox.Focus();
+    }
+
+    private void ProfileNameSave_Click(object sender, RoutedEventArgs e) => SaveProfile();
+    private void ProfileNameCancel_Click(object sender, RoutedEventArgs e) => HideOverlays();
+
+    private void ProfileNameBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter) { SaveProfile(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { HideOverlays(); e.Handled = true; }
+    }
+
+    private void SaveProfile()
+    {
+        var s = SelectedStrategy();
+        if (s is null) { HideOverlays(); return; }
+
+        var name = ProfileNameBox.Text?.Trim() ?? "";
+        if (name.Length == 0)
+            name = s.Label;
+
+        _state.Config.Profiles.Add(new Profile { Id = Guid.NewGuid().ToString("N"), Name = name, StrategyId = s.Id });
+        _state.Save();
+        RebuildProfiles();
+        HideOverlays();
+    }
+
+    private void ProfileApply_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id })
+            return;
+        var p = _state.Config.Profiles.FirstOrDefault(x => x.Id == id);
+        var s = p is null ? null : _catalog.ById(p.StrategyId);
+        if (s is null)
+        {
+            Notify("Профили", "Стратегия этого профиля больше не существует.", BalloonIcon.Warning);
+            return;
+        }
+        // Setting the selection flows through StrategyCombo_SelectionChanged (saves + restarts if running).
+        StrategyCombo.SelectedItem = s;
+        RebuildProfiles();
+    }
+
+    private void ProfileDelete_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string id })
+            return;
+        _state.Config.Profiles.RemoveAll(x => x.Id == id);
+        _state.Save();
+        RebuildProfiles();
     }
 
     private void Scrim_MouseDown(object sender, MouseButtonEventArgs e)
@@ -1090,6 +1557,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Scrim.Opacity = 1;
         Scrim.Visibility = Visibility.Collapsed;
         AutoPickPanel.Visibility = Visibility.Collapsed;
+        ProfileNamePanel.Visibility = Visibility.Collapsed;
+        DashCustomizePanel.Visibility = Visibility.Collapsed;
     }
 
     private void StartSpinner()
@@ -1162,8 +1631,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
         TrayToggle.Header = running ? "Отключить" : "Подключить";
         Tray.ToolTipText = running ? $"Zapret2 — {shown?.Label}" : "Zapret2";
+        Tray.IconSource = running ? TrayOn : TrayOff;
 
         SetPulse(running && !_busy);
+
+        // A gentle pop on the power icon the moment protection turns on.
+        if (running && !_wasRunning)
+            PopConnect();
+        _wasRunning = running;
 
         if (running)
         {
@@ -1175,7 +1650,21 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             _uptimeTimer.Stop();
             UptimePanel.Visibility = Visibility.Collapsed;
+            EngineStatsPanel.Visibility = Visibility.Collapsed;
         }
+    }
+
+    private void PopConnect()
+    {
+        var scale = new ScaleTransform(1, 1);
+        ConnectIcon.RenderTransformOrigin = new Point(0.5, 0.5);
+        ConnectIcon.RenderTransform = scale;
+        var pop = new DoubleAnimation(0.9, 1, TimeSpan.FromMilliseconds(260))
+        {
+            EasingFunction = new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.2 },
+        };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
     }
 
     private void UpdateUptime()
@@ -1189,10 +1678,22 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 ? $"{(int)elapsed.TotalHours:00}:{elapsed.Minutes:00}:{elapsed.Seconds:00}"
                 : $"{elapsed.Minutes:00}:{elapsed.Seconds:00}";
             UptimePanel.Visibility = Visibility.Visible;
+
+            var (ram, cpu) = _runner.SampleUsage();
+            if (ram > 0)
+            {
+                EngineStatsText.Text = $"ОЗУ {ram / (1024 * 1024)} МБ · ЦП {cpu:0.#}%";
+                EngineStatsPanel.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                EngineStatsPanel.Visibility = Visibility.Collapsed;
+            }
         }
         else
         {
             UptimePanel.Visibility = Visibility.Collapsed;
+            EngineStatsPanel.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -1253,24 +1754,18 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         return brush;
     }
 
-    private static Brush FreezeA(byte a, byte r, byte g, byte b)
+    // A small status disc for the tray: green when protected, gray when off.
+    private static ImageSource MakeTrayIcon(Color fill)
     {
-        var brush = new SolidColorBrush(Color.FromArgb(a, r, g, b));
-        brush.Freeze();
-        return brush;
+        var dg = new DrawingGroup();
+        using (var dc = dg.Open())
+            dc.DrawEllipse(new SolidColorBrush(fill),
+                new Pen(new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0)), 2),
+                new Point(16, 16), 13, 13);
+        var img = new DrawingImage(dg);
+        img.Freeze();
+        return img;
     }
-
-    private StatusCell BadgeCell(ProbeCell? c) => c is null
-        ? new StatusCell("—", FailBrush, NoBadgeBg)
-        : c.State switch
-        {
-            ProbeState.Ok => new StatusCell("OK", OkBrush, OkBadgeBg, c.Detail),
-            ProbeState.Err => new StatusCell("ERR", ErrorBrush, ErrBadgeBg, c.Detail),
-            _ => new StatusCell("н/д", FailBrush, NoBadgeBg, c.Detail),
-        };
-
-    private StatusCell PingCellVm(ProbeCell c) =>
-        new(c.Detail, c.State == ProbeState.Ok ? FailBrush : ErrorBrush, NoBadgeBg);
 }
 
 internal sealed class AutoPickItem
@@ -1283,6 +1778,21 @@ internal sealed class AutoPickItem
         Text = text;
         Brush = brush;
     }
+}
+
+internal sealed class ProfileVm
+{
+    public string Id { get; init; } = "";
+    public string Name { get; init; } = "";
+    public string StrategyLabel { get; init; } = "";
+    public Brush Border { get; init; } = Brushes.Transparent;
+}
+
+internal sealed class DashCardOption
+{
+    public string Key { get; init; } = "";
+    public string Title { get; init; } = "";
+    public bool Enabled { get; set; }
 }
 
 internal sealed class CheckRow
@@ -1303,51 +1813,15 @@ internal sealed class StrategyTestGroup
 {
     public string Label { get; }
     public string Summary { get; }
-    public string Analytics { get; }
     public Brush Brush { get; }
-    public ObservableCollection<SiteRow> Rows { get; }
+    public ObservableCollection<CheckRow> Rows { get; }
 
-    public StrategyTestGroup(string label, string summary, string analytics, Brush brush, ObservableCollection<SiteRow> rows)
+    public StrategyTestGroup(string label, string summary, Brush brush, ObservableCollection<CheckRow> rows)
     {
         Label = label;
         Summary = summary;
-        Analytics = analytics;
         Brush = brush;
         Rows = rows;
-    }
-}
-
-internal sealed class StatusCell
-{
-    public string Text { get; }
-    public Brush Fg { get; }
-    public Brush Bg { get; }
-    public string? Tip { get; }
-
-    public StatusCell(string text, Brush fg, Brush bg, string tip = "")
-    {
-        Text = text;
-        Fg = fg;
-        Bg = bg;
-        Tip = string.IsNullOrEmpty(tip) ? null : tip;
-    }
-}
-
-internal sealed class SiteRow
-{
-    public string Name { get; }
-    public StatusCell Http { get; }
-    public StatusCell Tls12 { get; }
-    public StatusCell Tls13 { get; }
-    public StatusCell Ping { get; }
-
-    public SiteRow(string name, StatusCell http, StatusCell tls12, StatusCell tls13, StatusCell ping)
-    {
-        Name = name;
-        Http = http;
-        Tls12 = tls12;
-        Tls13 = tls13;
-        Ping = ping;
     }
 }
 
@@ -1380,5 +1854,31 @@ internal sealed class NaturalComparer : IComparer<string>
             }
         }
         return (a.Length - i).CompareTo(b.Length - j);
+    }
+}
+
+/// <summary>Animates a pixel <see cref="GridLength"/> (WPF has no built-in animation for it) - used for the nav pane slide.</summary>
+internal sealed class GridLengthAnimation : AnimationTimeline
+{
+    public static readonly DependencyProperty FromProperty =
+        DependencyProperty.Register(nameof(From), typeof(GridLength), typeof(GridLengthAnimation));
+    public static readonly DependencyProperty ToProperty =
+        DependencyProperty.Register(nameof(To), typeof(GridLength), typeof(GridLengthAnimation));
+
+    public GridLength From { get => (GridLength)GetValue(FromProperty); set => SetValue(FromProperty, value); }
+    public GridLength To { get => (GridLength)GetValue(ToProperty); set => SetValue(ToProperty, value); }
+    public IEasingFunction? EasingFunction { get; set; }
+
+    public override Type TargetPropertyType => typeof(GridLength);
+    protected override Freezable CreateInstanceCore() => new GridLengthAnimation();
+
+    public override object GetCurrentValue(object defaultOriginValue, object defaultDestinationValue, AnimationClock clock)
+    {
+        var p = clock.CurrentProgress ?? 0.0;
+        if (EasingFunction is not null)
+            p = EasingFunction.Ease(p);
+        var from = From.Value;
+        var to = To.Value;
+        return new GridLength(from + (to - from) * p, GridUnitType.Pixel);
     }
 }

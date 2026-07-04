@@ -2,8 +2,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Net.NetworkInformation;
-using System.Net.Security;
-using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.ServiceProcess;
 using System.Text.Json;
@@ -221,18 +219,116 @@ public static class Diagnostics
     }
 }
 
+public sealed record SysNet(
+    string PublicIp, string Asn, string Isp, string Location,
+    string Os, string Machine, string Cpu, string Ram, string Uptime);
+
+/// <summary>Collects public IP / ASN / ISP (via ipinfo.io) plus local system facts for the info panel.</summary>
+public static class SysNetInfo
+{
+    public static async Task<SysNet> CollectAsync(CancellationToken ct = default)
+    {
+        var (ip, asn, isp, loc) = await FetchPublicAsync(ct).ConfigureAwait(false);
+        return new SysNet(
+            PublicIp: ip,
+            Asn: asn,
+            Isp: isp,
+            Location: loc,
+            Os: System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            Machine: Environment.MachineName,
+            Cpu: Cpu(),
+            Ram: Ram(),
+            Uptime: Uptime());
+    }
+
+    private static async Task<(string ip, string asn, string isp, string loc)> FetchPublicAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("Zapret2/1.0");
+            var json = await http.GetStringAsync("https://ipinfo.io/json", ct).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var ip = Str(root, "ip");
+            var org = Str(root, "org");              // "AS15169 Google LLC"
+            var asn = "";
+            var isp = org;
+            if (org.StartsWith("AS", StringComparison.OrdinalIgnoreCase))
+            {
+                var sp = org.IndexOf(' ');
+                if (sp > 0) { asn = org[..sp]; isp = org[(sp + 1)..]; }
+            }
+            var loc = string.Join(", ",
+                new[] { Str(root, "city"), Str(root, "region"), Str(root, "country") }.Where(s => s.Length > 0));
+
+            return (Dash(ip), Dash(asn), Dash(isp), Dash(loc));
+        }
+        catch { return ("недоступно", "—", "—", "—"); }
+    }
+
+    private static string Dash(string s) => string.IsNullOrWhiteSpace(s) ? "—" : s;
+
+    private static string Str(JsonElement e, string name)
+        => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+
+    private static string Cpu()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+            var name = (key?.GetValue("ProcessorNameString") as string)?.Trim();
+            return string.IsNullOrWhiteSpace(name)
+                ? $"{Environment.ProcessorCount} логич. потоков"
+                : $"{name} · {Environment.ProcessorCount} потоков";
+        }
+        catch { return $"{Environment.ProcessorCount} логич. потоков"; }
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MemStatus
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys, ullAvailPhys, ullTotalPageFile,
+                     ullAvailPageFile, ullTotalVirtual, ullAvailVirtual, ullAvailExtendedVirtual;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemStatus buffer);
+
+    private static string Ram()
+    {
+        try
+        {
+            var s = new MemStatus { dwLength = (uint)System.Runtime.InteropServices.Marshal.SizeOf<MemStatus>() };
+            if (GlobalMemoryStatusEx(ref s))
+            {
+                const double gb = 1024.0 * 1024 * 1024;
+                var used = (s.ullTotalPhys - s.ullAvailPhys) / gb;
+                var total = s.ullTotalPhys / gb;
+                return $"{used:0.0} / {total:0.0} ГБ ({s.dwMemoryLoad}%)";
+            }
+        }
+        catch { }
+        return "—";
+    }
+
+    private static string Uptime()
+    {
+        var t = TimeSpan.FromMilliseconds(Environment.TickCount64);
+        return t.Days > 0 ? $"{t.Days} д {t.Hours} ч {t.Minutes} мин" : $"{t.Hours} ч {t.Minutes} мин";
+    }
+}
+
 public enum ProbeKind { Https, Ping }
 
-public sealed record TestTarget(string Name, ProbeKind Kind, string Host);
+public sealed record TestTarget(string Name, ProbeKind Kind, string Host, string? Url = null);
 
 public sealed record TestResult(string Name, bool Ok, string Detail);
-
-public enum ProbeState { Ok, Err, Na }
-
-public sealed record ProbeCell(ProbeState State, string Detail);
-
-public sealed record SiteAvailability(
-    string Name, bool IsSite, ProbeCell? Http, ProbeCell? Tls12, ProbeCell? Tls13, ProbeCell Ping);
 
 public sealed class TestProgress
 {
@@ -245,63 +341,25 @@ public static class RestrictionTester
 {
     public static readonly IReadOnlyList<TestTarget> DefaultTargets = new List<TestTarget>
     {
-        new("Discord",            ProbeKind.Https, "discord.com"),
-        new("Discord Gateway",    ProbeKind.Https, "gateway.discord.gg"),
-        new("Discord CDN",        ProbeKind.Https, "cdn.discordapp.com"),
-        new("YouTube",            ProbeKind.Https, "www.youtube.com"),
-        new("YouTube (картинки)", ProbeKind.Https, "i.ytimg.com"),
-        new("YouTube (видео)",    ProbeKind.Https, "redirector.googlevideo.com"),
-        new("Google",             ProbeKind.Https, "www.google.com"),
-        new("Cloudflare",         ProbeKind.Https, "www.cloudflare.com"),
+        new("Discord",            ProbeKind.Https, "discord.com",              "https://discord.com"),
+        new("Discord Gateway",    ProbeKind.Https, "gateway.discord.gg",       "https://gateway.discord.gg"),
+        new("Discord CDN",        ProbeKind.Https, "cdn.discordapp.com",       "https://cdn.discordapp.com"),
+        new("YouTube",            ProbeKind.Https, "www.youtube.com",          "https://www.youtube.com"),
+        new("YouTube (картинки)", ProbeKind.Https, "i.ytimg.com",              "https://i.ytimg.com"),
+        new("YouTube (видео)",    ProbeKind.Https, "redirector.googlevideo.com","https://redirector.googlevideo.com"),
+        new("Google",             ProbeKind.Https, "www.google.com",           "https://www.google.com"),
+        new("Cloudflare",         ProbeKind.Https, "www.cloudflare.com",       "https://www.cloudflare.com"),
         new("DNS Cloudflare",     ProbeKind.Ping,  "1.1.1.1"),
         new("DNS Google",         ProbeKind.Ping,  "8.8.8.8"),
         new("DNS Quad9",          ProbeKind.Ping,  "9.9.9.9"),
     };
 
-    private static readonly bool Tls13Supported = OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000);
-
-    public static async Task<List<SiteAvailability>> RunAsync(IProgress<TestProgress> progress, CancellationToken ct)
+    public static async Task<List<TestResult>> RunAsync(IProgress<TestProgress> progress, CancellationToken ct)
     {
         var targets = DefaultTargets;
-        var results = new SiteAvailability[targets.Count];
+        var results = new List<TestResult>(targets.Count);
         var done = 0;
 
-        using var httpPlain = MakeClient(null);
-        using var httpTls12 = MakeClient(SslProtocols.Tls12);
-        using HttpClient? httpTls13 = Tls13Supported ? MakeClient(SslProtocols.Tls13) : null;
-
-        var tasks = targets.Select(async (t, i) =>
-        {
-            SiteAvailability sa;
-            if (t.Kind == ProbeKind.Https)
-            {
-                var httpTask = ProbeHttpAsync(httpPlain, $"http://{t.Host}", ct);
-                var t12Task = ProbeHttpAsync(httpTls12, $"https://{t.Host}", ct);
-                var t13Task = httpTls13 is null
-                    ? Task.FromResult(new ProbeCell(ProbeState.Na, "TLS 1.3 не поддерживается ОС"))
-                    : ProbeHttpAsync(httpTls13, $"https://{t.Host}", ct);
-                var pingTask = ProbePingCellAsync(t.Host, ct);
-                await Task.WhenAll(httpTask, t12Task, t13Task, pingTask).ConfigureAwait(false);
-                sa = new SiteAvailability(t.Name, true, httpTask.Result, t12Task.Result, t13Task.Result, pingTask.Result);
-            }
-            else
-            {
-                var ping = await ProbePingCellAsync(t.Host, ct).ConfigureAwait(false);
-                sa = new SiteAvailability(t.Name, false, null, null, null, ping);
-            }
-
-            results[i] = sa;
-            var d = Interlocked.Increment(ref done);
-            progress.Report(new TestProgress { Done = d, Total = targets.Count });
-            return sa;
-        });
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-        return results.ToList();
-    }
-
-    private static HttpClient MakeClient(SslProtocols? proto)
-    {
         var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
@@ -309,43 +367,58 @@ public static class RestrictionTester
             ConnectTimeout = TimeSpan.FromSeconds(5),
             AutomaticDecompression = System.Net.DecompressionMethods.None,
         };
-        if (proto is not null)
-            handler.SslOptions.EnabledSslProtocols = proto.Value;
-        var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) };
+        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("Zapret2/1.0");
-        return http;
+
+        var tasks = targets.Select(async t =>
+        {
+            var r = t.Kind == ProbeKind.Https
+                ? await ProbeHttpsAsync(http, t, ct).ConfigureAwait(false)
+                : await ProbePingAsync(t, ct).ConfigureAwait(false);
+
+            lock (results)
+            {
+                results.Add(r);
+                done++;
+                progress.Report(new TestProgress { Done = done, Total = targets.Count, Result = r });
+            }
+            return r;
+        });
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+        return targets.Select(t => results.First(r => r.Name == t.Name)).ToList();
     }
 
-    private static async Task<ProbeCell> ProbeHttpAsync(HttpClient http, string url, CancellationToken ct)
+    private static async Task<TestResult> ProbeHttpsAsync(HttpClient http, TestTarget t, CancellationToken ct)
     {
+        var sw = Stopwatch.StartNew();
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            using var req = new HttpRequestMessage(HttpMethod.Get, t.Url);
             using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
-            return new ProbeCell(ProbeState.Ok, $"код {(int)resp.StatusCode}");
+            sw.Stop();
+            return new TestResult(t.Name, true, $"доступно · {(int)resp.StatusCode} · {sw.ElapsedMilliseconds} мс");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (PlatformNotSupportedException) { return new ProbeCell(ProbeState.Na, "не поддерживается ОС"); }
-        catch (NotSupportedException) { return new ProbeCell(ProbeState.Na, "не поддерживается ОС"); }
         catch (Exception ex)
         {
-            var reason = ex is TaskCanceledException or System.TimeoutException ? "таймаут" : "сброс / ошибка";
-            return new ProbeCell(ProbeState.Err, reason);
+            var reason = ex is TaskCanceledException or System.TimeoutException ? "таймаут" : "сброс соединения";
+            return new TestResult(t.Name, false, $"недоступно · {reason}");
         }
     }
 
-    private static async Task<ProbeCell> ProbePingCellAsync(string host, CancellationToken ct)
+    private static async Task<TestResult> ProbePingAsync(TestTarget t, CancellationToken ct)
     {
         try
         {
             using var ping = new Ping();
-            var reply = await ping.SendPingAsync(host, TimeSpan.FromSeconds(3), cancellationToken: ct).ConfigureAwait(false);
+            var reply = await ping.SendPingAsync(t.Host, TimeSpan.FromSeconds(3), cancellationToken: ct).ConfigureAwait(false);
             return reply.Status == IPStatus.Success
-                ? new ProbeCell(ProbeState.Ok, $"{reply.RoundtripTime} мс")
-                : new ProbeCell(ProbeState.Err, "таймаут");
+                ? new TestResult(t.Name, true, $"пинг {reply.RoundtripTime} мс")
+                : new TestResult(t.Name, false, $"нет ответа · {reply.Status}");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch { return new ProbeCell(ProbeState.Err, "нет ответа"); }
+        catch { return new TestResult(t.Name, false, "нет ответа"); }
     }
 }
 

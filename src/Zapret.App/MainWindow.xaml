@@ -3,6 +3,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
                  xmlns:tb="http://www.hardcodet.net/taskbar"
+                 xmlns:avalonedit="http://icsharpcode.net/sharpdevelop/avalonedit"
                  xmlns:po="http://schemas.microsoft.com/winfx/2006/xaml/presentation/options"
                  Title="Zapret2"
                  Width="820" Height="720"
@@ -52,6 +53,49 @@
       <Setter Property="Grid.Column" Value="0" />
       <Setter Property="FontSize" Value="18" />
       <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <!-- Dashboard card: subtle hover lift + accent border (Fluent micro-interaction). -->
+    <Style x:Key="DashCard" TargetType="Border">
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="Padding" Value="18" />
+      <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="RenderTransformOrigin" Value="0.5,0.5" />
+      <Setter Property="RenderTransform">
+        <Setter.Value>
+          <TransformGroup>
+            <ScaleTransform ScaleX="1" ScaleY="1" />
+            <TranslateTransform />
+          </TransformGroup>
+        </Setter.Value>
+      </Setter>
+      <!-- Own brush so the border colour can animate per-card on hover. -->
+      <Setter Property="BorderBrush">
+        <Setter.Value>
+          <SolidColorBrush Color="{DynamicResource CardStrokeColorDefault}" />
+        </Setter.Value>
+      </Setter>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <ColorAnimation Storyboard.TargetProperty="BorderBrush.Color" To="#802E8BFF" Duration="0:0:0.18">
+                  <ColorAnimation.EasingFunction><CubicEase EasingMode="EaseOut" /></ColorAnimation.EasingFunction>
+                </ColorAnimation>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <ColorAnimation Storyboard.TargetProperty="BorderBrush.Color" Duration="0:0:0.28" />
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+      </Style.Triggers>
     </Style>
   </ui:FluentWindow.Resources>
 
@@ -171,76 +215,218 @@
 
       <Grid Grid.Column="2" Margin="24,8,24,20">
 
-        <StackPanel x:Name="DashboardPanel" VerticalAlignment="Center">
-          <Border Width="220" Height="220" Background="Transparent"
-                  Cursor="Hand" MouseLeftButtonUp="Connect_Click" HorizontalAlignment="Center">
-            <Grid>
-              <Ellipse x:Name="ConnectPulse" Width="220" Height="220"
-                       Stroke="{DynamicResource AccentTextFillColorPrimaryBrush}" StrokeThickness="2" Opacity="0" />
-              <Ellipse Width="220" Height="220" Stroke="#1AFFFFFF" StrokeThickness="1" />
-              <Ellipse x:Name="ConnectRing" Width="184" Height="184"
-                       Stroke="{StaticResource RingOff}" StrokeThickness="6" Fill="#14000000" />
-              <Ellipse x:Name="Spinner" Width="184" Height="184" Visibility="Collapsed"
-                       Stroke="{DynamicResource AccentTextFillColorPrimaryBrush}" StrokeThickness="4"
-                       StrokeDashArray="16 90" StrokeDashCap="Round" RenderTransformOrigin="0.5,0.5">
-                <Ellipse.RenderTransform>
-                  <RotateTransform x:Name="SpinnerRotate" />
-                </Ellipse.RenderTransform>
-              </Ellipse>
-              <ui:SymbolIcon x:Name="ConnectIcon" Symbol="Power24" FontSize="68"
-                             VerticalAlignment="Center" HorizontalAlignment="Center"
-                             Foreground="{StaticResource RingOff}" />
-            </Grid>
-          </Border>
+        <Grid x:Name="DashboardPanel">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
 
-          <TextBlock x:Name="StatusTitle" Text="Не защищено" Margin="0,26,0,0"
-                     FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"
-                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-          <TextBlock x:Name="StatusSub" Text="Нажмите кнопку, чтобы включить обход"
-                     Margin="0,4,0,0" FontSize="13" HorizontalAlignment="Center" TextAlignment="Center"
-                     Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-
-          <StackPanel x:Name="UptimePanel" Orientation="Horizontal" HorizontalAlignment="Center"
-                      Margin="0,10,0,0" Visibility="Collapsed">
-            <ui:SymbolIcon Symbol="Timer24" FontSize="15" VerticalAlignment="Center"
-                           Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
-            <TextBlock x:Name="UptimeText" Margin="7,0,0,0" FontSize="14" FontWeight="SemiBold"
-                       VerticalAlignment="Center" FontFamily="Consolas"
-                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-          </StackPanel>
-
-          <Border Margin="0,26,0,0" Padding="14,10" CornerRadius="10" MaxWidth="420"
+          <!-- ===== Hero card: connect + status + strategy ===== -->
+          <Border x:Name="HeroCard" Grid.Column="0" Width="360" CornerRadius="12" Padding="24"
                   Background="{DynamicResource ControlFillColorDefaultBrush}"
                   BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <Grid>
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-              <ui:SymbolIcon Grid.Column="0" Symbol="ShieldTask24" FontSize="24"
-                             VerticalAlignment="Center" Margin="2,0,14,0"
-                             Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
-              <StackPanel Grid.Column="1">
-                <TextBlock Text="СТРАТЕГИЯ" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                <ComboBox x:Name="StrategyCombo" DisplayMemberPath="Label"
-                          SelectionChanged="StrategyCombo_SelectionChanged"
-                          BorderThickness="0" Background="Transparent" Padding="0,2" Margin="-2,2,0,0" />
+            <StackPanel VerticalAlignment="Center">
+              <Border Width="200" Height="200" Background="Transparent" Cursor="Hand"
+                      MouseLeftButtonUp="Connect_Click" HorizontalAlignment="Center">
+                <Grid>
+                  <Ellipse x:Name="ConnectPulse" Width="200" Height="200"
+                           Stroke="{DynamicResource AccentTextFillColorPrimaryBrush}" StrokeThickness="2" Opacity="0" />
+                  <Ellipse Width="200" Height="200" Stroke="#1AFFFFFF" StrokeThickness="1" />
+                  <Ellipse x:Name="ConnectRing" Width="168" Height="168"
+                           Stroke="{StaticResource RingOff}" StrokeThickness="6" Fill="#14000000" />
+                  <Ellipse x:Name="Spinner" Width="168" Height="168" Visibility="Collapsed"
+                           Stroke="{DynamicResource AccentTextFillColorPrimaryBrush}" StrokeThickness="4"
+                           StrokeDashArray="16 90" StrokeDashCap="Round" RenderTransformOrigin="0.5,0.5">
+                    <Ellipse.RenderTransform>
+                      <RotateTransform x:Name="SpinnerRotate" />
+                    </Ellipse.RenderTransform>
+                  </Ellipse>
+                  <ui:SymbolIcon x:Name="ConnectIcon" Symbol="Power24" FontSize="58"
+                                 VerticalAlignment="Center" HorizontalAlignment="Center"
+                                 Foreground="{StaticResource RingOff}" />
+                </Grid>
+              </Border>
+
+              <TextBlock x:Name="StatusTitle" Text="Не защищено" Margin="0,22,0,0"
+                         FontSize="22" FontWeight="Bold" HorizontalAlignment="Center"
+                         Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+              <TextBlock x:Name="StatusSub" Text="Нажмите кнопку, чтобы включить обход"
+                         Margin="0,4,0,0" FontSize="13" HorizontalAlignment="Center" TextAlignment="Center"
+                         TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+              <StackPanel x:Name="UptimePanel" Orientation="Horizontal" HorizontalAlignment="Center"
+                          Margin="0,10,0,0" Visibility="Collapsed">
+                <ui:SymbolIcon Symbol="Timer24" FontSize="15" VerticalAlignment="Center"
+                               Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                <TextBlock x:Name="UptimeText" Margin="7,0,0,0" FontSize="14" FontWeight="SemiBold"
+                           VerticalAlignment="Center" FontFamily="Consolas"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
               </StackPanel>
-            </Grid>
+
+              <StackPanel x:Name="EngineStatsPanel" Orientation="Horizontal" HorizontalAlignment="Center"
+                          Margin="0,6,0,0" Visibility="Collapsed">
+                <ui:SymbolIcon Symbol="Pulse24" FontSize="14" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock x:Name="EngineStatsText" Margin="6,0,0,0" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+              </StackPanel>
+
+              <TextBlock Text="СТРАТЕГИЯ" FontSize="11" FontWeight="SemiBold"
+                         Margin="2,22,0,6" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+              <ComboBox x:Name="StrategyCombo" DisplayMemberPath="Label"
+                        SelectionChanged="StrategyCombo_SelectionChanged"
+                        HorizontalAlignment="Stretch" FontSize="14" Padding="12,8" />
+
+              <ui:Button x:Name="AutoPickButton" Margin="0,12,0,0" HorizontalAlignment="Stretch"
+                         HorizontalContentAlignment="Center" Content="Авто-подбор"
+                         Icon="{ui:SymbolIcon Sparkle24}" Click="AutoPick_Click" />
+            </StackPanel>
           </Border>
 
-          <ui:Button x:Name="AutoPickButton" Margin="0,14,0,0" MinWidth="220"
-                     HorizontalAlignment="Center" HorizontalContentAlignment="Center"
-                     Content="Авто-подбор" Icon="{ui:SymbolIcon Sparkle24}" Click="AutoPick_Click" />
+          <!-- ===== Feature cards (composable) ===== -->
+          <Grid Grid.Column="1" Margin="16,0,0,0">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
 
-          <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
-            <ui:SymbolIcon Symbol="TextBulletListSquare24" FontSize="14" VerticalAlignment="Center"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="ListCountsText" Margin="7,0,0,0" VerticalAlignment="Center" FontSize="13"
-                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="списки…" />
-          </StackPanel>
-        </StackPanel>
+            <ui:Button Grid.Row="0" HorizontalAlignment="Right" Appearance="Transparent" Content="Настроить"
+                       Icon="{ui:SymbolIcon Options24}" FontSize="12" Margin="0,0,0,6"
+                       Click="DashCustomize_Click" ToolTip="Выбрать карточки и их порядок" />
+
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+              <StackPanel x:Name="DashCards">
+
+                <Border x:Name="CardLists" Style="{StaticResource DashCard}" Margin="0,0,0,12">
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <ui:SymbolIcon Symbol="TextBulletListSquare24" FontSize="18" VerticalAlignment="Center"
+                                     Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                      <TextBlock Text="Списки" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="16"
+                                 FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </StackPanel>
+                    <TextBlock x:Name="ListCountsText" Margin="0,8,0,0" FontSize="14" Text="списки…"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                      <ui:Button Content="Открыть" Margin="0,0,8,0" Click="NavToLists_Click" />
+                      <ui:Button Content="Обновить IP" Icon="{ui:SymbolIcon ArrowClockwise24}" Click="Update_Click" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <Border x:Name="CardActions" Style="{StaticResource DashCard}" Margin="0,0,0,12">
+                  <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                      <ui:SymbolIcon Symbol="AppsList24" FontSize="18" VerticalAlignment="Center"
+                                     Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                      <TextBlock Text="Быстрые действия" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="16"
+                                 FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </StackPanel>
+                    <WrapPanel Margin="0,12,0,0">
+                      <ui:Button Content="Диагностика" Icon="{ui:SymbolIcon Stethoscope24}" Margin="0,4,8,4" Click="NavToDiag_Click" />
+                      <ui:Button Content="Стратегии" Icon="{ui:SymbolIcon Wrench24}" Margin="0,4,8,4" Click="NavToEditor_Click" />
+                      <ui:Button Content="Журнал" Icon="{ui:SymbolIcon DocumentBulletList24}" Margin="0,4,0,4" Click="NavToJournal_Click" />
+                    </WrapPanel>
+                  </StackPanel>
+                </Border>
+
+                <Border x:Name="CardNet" Style="{StaticResource DashCard}" Margin="0,0,0,12">
+                  <StackPanel>
+                    <Grid>
+                      <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Globe24" FontSize="18" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="Сеть" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="16"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                      <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
+                        <ui:Button x:Name="NetMaskButton" Appearance="Transparent" Icon="{ui:SymbolIcon EyeOff24}"
+                                   FontSize="12" Click="MaskInfo_Click" ToolTip="Скрыть / показать данные" />
+                        <ui:Button x:Name="NetRefreshButton" Appearance="Transparent" Icon="{ui:SymbolIcon ArrowClockwise24}"
+                                   FontSize="12" Click="NetRefresh_Click" ToolTip="Обновить" />
+                      </StackPanel>
+                    </Grid>
+                    <Grid Margin="0,10,0,0">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                      </Grid.RowDefinitions>
+                      <TextBlock Grid.Row="0" Grid.Column="0" Text="IP" FontSize="12" Margin="0,0,12,4"
+                                 Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                      <TextBlock x:Name="InfoNetIp" Grid.Row="0" Grid.Column="1" Text="—" FontSize="13" FontWeight="SemiBold"
+                                 Margin="0,0,0,4" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                      <TextBlock Grid.Row="1" Grid.Column="0" Text="Провайдер" FontSize="12" Margin="0,0,12,0"
+                                 Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                      <TextBlock x:Name="InfoNetIsp" Grid.Row="1" Grid.Column="1" Text="—" FontSize="13" FontWeight="SemiBold"
+                                 TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </Grid>
+                  </StackPanel>
+                </Border>
+
+                <Border x:Name="CardProfiles" Style="{StaticResource DashCard}" Margin="0,0,0,12">
+                  <Grid>
+                    <Grid.RowDefinitions>
+                      <RowDefinition Height="Auto" />
+                      <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0">
+                      <StackPanel Orientation="Horizontal">
+                        <ui:SymbolIcon Symbol="Bookmark24" FontSize="18" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="Профили" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="16"
+                                   FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                      </StackPanel>
+                      <ui:Button HorizontalAlignment="Right" Appearance="Transparent" Content="Сохранить текущий"
+                                 Icon="{ui:SymbolIcon Add24}" FontSize="12" Click="ProfileAdd_Click"
+                                 ToolTip="Сохранить текущую стратегию как профиль" />
+                    </Grid>
+
+                    <TextBlock x:Name="ProfilesEmpty" Grid.Row="1" TextWrapping="Wrap" Margin="0,8,0,0"
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               Text="Профилей пока нет. Выберите стратегию и нажмите «Сохранить текущий» — потом переключайтесь в один клик." />
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" MaxHeight="240" Margin="0,8,0,0">
+                      <ItemsControl x:Name="ProfilesList">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Margin="0,3" Padding="4" CornerRadius="8"
+                                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                                BorderThickness="1" BorderBrush="{Binding Border}">
+                          <Grid>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                    HorizontalContentAlignment="Left" Padding="8,4" Tag="{Binding Id}"
+                                    Click="ProfileApply_Click" ToolTip="Переключиться на этот профиль">
+                              <StackPanel>
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13"
+                                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                <TextBlock Text="{Binding StrategyLabel}" FontSize="11" TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                              </StackPanel>
+                            </Button>
+                            <ui:Button Grid.Column="1" Appearance="Transparent" VerticalAlignment="Center"
+                                       Icon="{ui:SymbolIcon Delete24}" Tag="{Binding Id}"
+                                       Click="ProfileDelete_Click" ToolTip="Удалить профиль" />
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+              </Grid>
+            </Border>
+
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
 
         <Grid x:Name="ListsPanel" Visibility="Collapsed">
           <Grid.RowDefinitions>
@@ -249,22 +435,24 @@
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
 
-          <Grid Grid.Row="0" Margin="0,4,0,12">
-            <TextBlock Text="Списки" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center"
+          <StackPanel Grid.Row="0" Margin="0,4,0,12">
+            <TextBlock Text="Списки" FontSize="22" FontWeight="SemiBold"
                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-              <CheckBox x:Name="SelectAllCheck" Content="Все" VerticalAlignment="Center" Margin="0,0,14,0"
+            <WrapPanel Margin="0,10,0,0">
+              <CheckBox x:Name="SelectAllCheck" Content="Все" VerticalAlignment="Center" Margin="0,4,16,4"
                         Checked="SelectAll_Changed" Unchecked="SelectAll_Changed" />
-              <ui:Button Content="Экспорт выбр." FontSize="12" Icon="{ui:SymbolIcon ArrowExport24}"
-                         Click="ExportSelected_Click" Margin="0,0,8,0" />
-              <ui:Button Content="Удалить выбр." FontSize="12" Icon="{ui:SymbolIcon Delete24}"
-                         Click="DeleteSelected_Click" Margin="0,0,16,0" />
-              <ui:Button Content="Добавить файл" Icon="{ui:SymbolIcon ArrowImport24}"
-                         Click="AddListFile_Click" Margin="0,0,8,0" />
-              <ui:Button Content="Создать" Icon="{ui:SymbolIcon DocumentAdd24}"
+              <ui:Button Content="Добавить файл" Icon="{ui:SymbolIcon ArrowImport24}" Margin="0,4,8,4"
+                         Click="AddListFile_Click" />
+              <ui:Button Content="Создать" Icon="{ui:SymbolIcon DocumentAdd24}" Margin="0,4,8,4"
                          Click="CreateListFile_Click" />
-            </StackPanel>
-          </Grid>
+              <ui:Button Content="Обновить IP" Icon="{ui:SymbolIcon ArrowClockwise24}" Margin="0,4,8,4"
+                         ToolTip="Скачать свежий ipset-all.txt" Click="Update_Click" />
+              <ui:Button Content="Экспорт выбранных" Icon="{ui:SymbolIcon ArrowExport24}" Margin="0,4,8,4"
+                         Click="ExportSelected_Click" />
+              <ui:Button Content="Удалить выбранные" Icon="{ui:SymbolIcon Delete24}" Margin="0,4,0,4"
+                         Click="DeleteSelected_Click" />
+            </WrapPanel>
+          </StackPanel>
 
           <ui:InfoBar Grid.Row="1" x:Name="ListsInfoBar" IsOpen="False" IsClosable="True" Margin="0,0,0,12" />
 
@@ -352,17 +540,30 @@
                 <ListBox x:Name="EditorList" DisplayMemberPath="Label" BorderThickness="0"
                          Background="Transparent" SelectionChanged="EditorList_SelectionChanged" />
               </Border>
-              <Grid Grid.Row="1" Margin="0,8,0,0">
-                <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="*" />
-                  <ColumnDefinition Width="8" />
-                  <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <ui:Button Grid.Column="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                           Content="Добавить" Icon="{ui:SymbolIcon Add24}" Click="EditorAdd_Click" />
-                <ui:Button Grid.Column="2" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                           Content="Удалить" Icon="{ui:SymbolIcon Delete24}" Click="EditorDelete_Click" />
-              </Grid>
+              <StackPanel Grid.Row="1" Margin="0,8,0,0">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <ui:Button Grid.Column="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                             Content="Добавить" Icon="{ui:SymbolIcon Add24}" Click="EditorAdd_Click" />
+                  <ui:Button Grid.Column="2" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                             Content="Удалить" Icon="{ui:SymbolIcon Delete24}" Click="EditorDelete_Click" />
+                </Grid>
+                <Grid Margin="0,8,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <ui:Button Grid.Column="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                             Content="Импорт" Icon="{ui:SymbolIcon ArrowImport24}" Click="EditorImport_Click" />
+                  <ui:Button Grid.Column="2" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                             Content="Экспорт" Icon="{ui:SymbolIcon ArrowExport24}" Click="EditorExport_Click" />
+                </Grid>
+              </StackPanel>
             </Grid>
 
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="16,0,0,0" Padding="0,0,16,0">
@@ -373,9 +574,60 @@
 
                 <TextBlock Text="Команда winws2 (полная, как .bat; %~dp0 = корень приложения)" FontWeight="SemiBold"
                            Margin="0,14,0,4" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                <ui:TextBox x:Name="EditArgs" AcceptsReturn="True" Height="280" FontFamily="Consolas"
-                            TextWrapping="NoWrap" VerticalScrollBarVisibility="Auto"
-                            PlaceholderText="Полная команда winws2. Можно вставить строку из .bat (start &quot;…&quot; /min &quot;%~dp0winws2.exe&quot; …) — префикс и переносы ^ распознаются." />
+                <TextBlock Text="Подсветка синтаксиса. Начните вводить -- для автодополнения (или Ctrl+Space). Подсказка параметра всплывает над курсором."
+                           FontSize="11" Margin="0,0,0,4" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <Border CornerRadius="6" BorderThickness="1" Padding="2"
+                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                        Background="{DynamicResource ControlFillColorDefaultBrush}">
+                  <avalonedit:TextEditor x:Name="EditArgs" Height="280" FontFamily="Consolas" FontSize="13"
+                                         ShowLineNumbers="True" WordWrap="False"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                         Background="Transparent"
+                                         Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                </Border>
+
+                <Expander x:Name="RefExpander" Margin="0,10,0,0" IsExpanded="False"
+                          Header="Справочник аргументов — поиск и клик для вставки">
+                  <StackPanel Margin="0,8,0,0">
+                    <ui:TextBox x:Name="RefSearch" Icon="{ui:SymbolIcon Search24}" Margin="0,0,0,8"
+                                PlaceholderText="Поиск: флаг, метод, параметр, значение…"
+                                TextChanged="RefSearch_TextChanged" />
+                    <ScrollViewer MaxHeight="300" VerticalScrollBarVisibility="Auto">
+                      <ItemsControl x:Name="RefList">
+                        <ItemsControl.GroupStyle>
+                          <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                              <DataTemplate>
+                                <TextBlock Text="{Binding Name}" FontSize="11" FontWeight="SemiBold" Margin="0,8,0,3"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                              </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                          </GroupStyle>
+                        </ItemsControl.GroupStyle>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Button Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="8,5" Margin="0,1"
+                                    HorizontalContentAlignment="Stretch" Tag="{Binding Insert}"
+                                    Click="RefChip_Click" ToolTip="Вставить в позицию курсора">
+                              <Grid>
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="Auto" MinWidth="190" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding Name}" FontFamily="Consolas" FontSize="13"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                                <TextBlock Grid.Column="1" Text="{Binding Hint}" FontSize="12" TextWrapping="Wrap"
+                                           Margin="10,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                              </Grid>
+                            </Button>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
+                  </StackPanel>
+                </Expander>
 
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
                   <ui:Button Content="Сохранить" Appearance="Primary" Icon="{ui:SymbolIcon Save24}"
@@ -419,6 +671,68 @@
 
           <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,18,0">
             <StackPanel>
+              <Grid Margin="0,0,0,4">
+                <TextBlock Text="Система и сеть" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                  <ui:Button x:Name="MaskInfoButton" Content="Скрыть" Icon="{ui:SymbolIcon EyeOff24}"
+                             Margin="0,0,8,0" Click="MaskInfo_Click"
+                             ToolTip="Замазать личные данные для скриншота" />
+                  <ui:Button x:Name="RefreshInfoButton" Content="Обновить" Icon="{ui:SymbolIcon ArrowClockwise24}"
+                             Click="RefreshInfo_Click" />
+                </StackPanel>
+              </Grid>
+              <TextBlock Text="Публичный IP, провайдер и параметры системы. Кнопкой «Скрыть» можно замазать личные данные перед отправкой скриншота."
+                         FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+              <Border Padding="16" CornerRadius="8"
+                      Background="{DynamicResource ControlFillColorDefaultBrush}"
+                      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="Публичный IP" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoPublicIp" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,1,0,10"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="ASN" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoAsn" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,1,0,10"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Провайдер (ISP)" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoIsp" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,1,0,10"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Расположение" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoLocation" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                  </StackPanel>
+
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Text="Система" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoOs" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,1,0,10"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Процессор" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoCpu" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,1,0,10"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Память" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoRam" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,1,0,10"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Имя ПК" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoMachine" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,1,0,10"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Аптайм" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="InfoUptime" Text="—" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+
+              <Border Margin="0,18,0,14" Height="1" Background="{DynamicResource CardStrokeColorDefaultBrush}" />
+
               <Grid Margin="0,0,0,4">
                 <TextBlock Text="Проверка системы" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"
                            Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
@@ -469,20 +783,13 @@
                 <TextBlock Text="Тип проверки:" VerticalAlignment="Center" Margin="0,0,10,0"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 <ComboBox x:Name="TestTypeCombo" SelectedIndex="0" Width="260">
-                  <ComboBoxItem Content="Стандартная (HTTP + TLS)" />
+                  <ComboBoxItem Content="Стандартная (HTTP + ping)" />
                   <ComboBoxItem Content="DPI-checker (TCP 16-20)" />
                 </ComboBox>
               </StackPanel>
 
-              <StackPanel x:Name="TestProgressPanel" Visibility="Collapsed" Margin="0,2,0,12">
-                <Grid Margin="0,0,0,6">
-                  <TextBlock x:Name="TestStatus" FontSize="13" VerticalAlignment="Center"
-                             Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                  <TextBlock x:Name="TestPercent" HorizontalAlignment="Right" FontSize="12" VerticalAlignment="Center"
-                             Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                </Grid>
-                <ProgressBar x:Name="TestProgress" Height="6" Minimum="0" Maximum="100" Value="0" />
-              </StackPanel>
+              <TextBlock x:Name="TestStatus" Visibility="Collapsed" Margin="0,0,0,8" FontSize="13"
+                         Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
               <ItemsControl x:Name="StrategyTests">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
@@ -501,86 +808,25 @@
                                      FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         </Grid>
                       </Expander.Header>
-                      <StackPanel Margin="4,4,0,6">
-                        <Border CornerRadius="8" BorderThickness="1"
-                                BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
-                                Background="{DynamicResource ControlFillColorDefaultBrush}">
-                          <StackPanel>
-                            <Grid Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                      <ItemsControl ItemsSource="{Binding Rows}" Margin="8,4,0,6">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Grid Margin="0,3">
                               <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="78" />
-                                <ColumnDefinition Width="90" />
-                                <ColumnDefinition Width="90" />
-                                <ColumnDefinition Width="86" />
+                                <ColumnDefinition Width="Auto" />
                               </Grid.ColumnDefinitions>
-                              <TextBlock Grid.Column="0" Text="Сайт" Margin="14,8" FontSize="12" FontWeight="SemiBold"
+                              <Ellipse Grid.Column="0" Width="8" Height="8" Fill="{Binding Brush}"
+                                       VerticalAlignment="Center" Margin="0,0,12,0" />
+                              <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center"
+                                         Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                              <TextBlock Grid.Column="2" Text="{Binding Detail}" VerticalAlignment="Center" FontSize="12"
                                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                              <TextBlock Grid.Column="1" Text="HTTP" Margin="0,8" HorizontalAlignment="Center" FontSize="12"
-                                         FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                              <TextBlock Grid.Column="2" Text="TLS 1.2" Margin="0,8" HorizontalAlignment="Center" FontSize="12"
-                                         FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                              <TextBlock Grid.Column="3" Text="TLS 1.3" Margin="0,8" HorizontalAlignment="Center" FontSize="12"
-                                         FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                              <TextBlock Grid.Column="4" Text="Пинг" Margin="0,8" HorizontalAlignment="Center" FontSize="12"
-                                         FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                             </Grid>
-                            <Border Height="1" Background="{DynamicResource CardStrokeColorDefaultBrush}" />
-                            <ItemsControl ItemsSource="{Binding Rows}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                  <Border BorderThickness="0,0,0,1"
-                                          BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                                    <Grid>
-                                      <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="78" />
-                                        <ColumnDefinition Width="90" />
-                                        <ColumnDefinition Width="90" />
-                                        <ColumnDefinition Width="86" />
-                                      </Grid.ColumnDefinitions>
-                                      <TextBlock Grid.Column="0" Text="{Binding Name}" Margin="14,9" VerticalAlignment="Center"
-                                                 TextTrimming="CharacterEllipsis"
-                                                 Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                                      <Border Grid.Column="1" BorderThickness="1,0,0,0" Padding="0,7"
-                                              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                                        <Border CornerRadius="4" Padding="9,2" HorizontalAlignment="Center"
-                                                Background="{Binding Http.Bg}" ToolTip="{Binding Http.Tip}">
-                                          <TextBlock Text="{Binding Http.Text}" FontSize="12" FontWeight="SemiBold"
-                                                     Foreground="{Binding Http.Fg}" />
-                                        </Border>
-                                      </Border>
-                                      <Border Grid.Column="2" BorderThickness="1,0,0,0" Padding="0,7"
-                                              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                                        <Border CornerRadius="4" Padding="9,2" HorizontalAlignment="Center"
-                                                Background="{Binding Tls12.Bg}" ToolTip="{Binding Tls12.Tip}">
-                                          <TextBlock Text="{Binding Tls12.Text}" FontSize="12" FontWeight="SemiBold"
-                                                     Foreground="{Binding Tls12.Fg}" />
-                                        </Border>
-                                      </Border>
-                                      <Border Grid.Column="3" BorderThickness="1,0,0,0" Padding="0,7"
-                                              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                                        <Border CornerRadius="4" Padding="9,2" HorizontalAlignment="Center"
-                                                Background="{Binding Tls13.Bg}" ToolTip="{Binding Tls13.Tip}">
-                                          <TextBlock Text="{Binding Tls13.Text}" FontSize="12" FontWeight="SemiBold"
-                                                     Foreground="{Binding Tls13.Fg}" />
-                                        </Border>
-                                      </Border>
-                                      <Border Grid.Column="4" BorderThickness="1,0,0,0" Padding="0,7"
-                                              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                                        <TextBlock Text="{Binding Ping.Text}" FontSize="12" HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center" Foreground="{Binding Ping.Fg}" />
-                                      </Border>
-                                    </Grid>
-                                  </Border>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                          </StackPanel>
-                        </Border>
-                        <TextBlock Text="{Binding Analytics}" Margin="2,8,0,0" FontSize="12" TextWrapping="Wrap"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                      </StackPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
                     </Expander>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
@@ -598,6 +844,8 @@
                            Checked="Autostart_Toggle" Unchecked="Autostart_Toggle" />
           <ui:ToggleSwitch x:Name="StartMinToggle" Content="Запускать свёрнутым в трей" Margin="0,6"
                            Checked="StartMin_Toggle" Unchecked="StartMin_Toggle" />
+          <ui:ToggleSwitch x:Name="AutoConnectToggle" Content="Подключать обход при запуске" Margin="0,6"
+                           Checked="AutoConnect_Toggle" Unchecked="AutoConnect_Toggle" />
 
           <Border Margin="0,20,0,0" Padding="16,14" CornerRadius="8"
                   Background="{DynamicResource ControlFillColorDefaultBrush}"
@@ -701,6 +949,67 @@
           </ScrollViewer>
           <ui:Button x:Name="AutoPickCloseBtn" Content="Отмена" HorizontalAlignment="Right"
                      Margin="0,14,0,0" Click="AutoPickClose_Click" />
+        </StackPanel>
+      </Border>
+
+      <Border x:Name="ProfileNamePanel" Visibility="Collapsed"
+              Width="380" VerticalAlignment="Center" HorizontalAlignment="Center"
+              Padding="18" CornerRadius="12"
+              Background="{DynamicResource ApplicationBackgroundBrush}"
+              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+        <StackPanel>
+          <TextBlock Text="Новый профиль" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4"
+                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+          <TextBlock x:Name="ProfileNameHint" Text="Сохранит текущую стратегию под этим именем." Margin="0,0,0,12"
+                     FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          <ui:TextBox x:Name="ProfileNameBox" PlaceholderText="напр. Дом, Работа, Провайдер X"
+                      KeyDown="ProfileNameBox_KeyDown" />
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <ui:Button Content="Отмена" Margin="0,0,8,0" Click="ProfileNameCancel_Click" />
+            <ui:Button x:Name="ProfileNameSaveBtn" Content="Сохранить" Appearance="Primary"
+                       Click="ProfileNameSave_Click" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border x:Name="DashCustomizePanel" Visibility="Collapsed"
+              Width="420" MaxHeight="540" VerticalAlignment="Center" HorizontalAlignment="Center"
+              Padding="18" CornerRadius="12"
+              Background="{DynamicResource ApplicationBackgroundBrush}"
+              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+        <StackPanel>
+          <TextBlock Text="Главный экран" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4"
+                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+          <TextBlock Text="Отметьте карточки, которые закрепить, и задайте порядок стрелками." Margin="0,0,0,12"
+                     FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          <ItemsControl x:Name="DashOptionsList">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border Margin="0,3" Padding="8,4" CornerRadius="8"
+                        Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox Grid.Column="0" IsChecked="{Binding Enabled, Mode=TwoWay}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" Margin="4,0,0,0" FontSize="14"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <ui:Button Grid.Column="2" Appearance="Transparent" Icon="{ui:SymbolIcon ChevronUp24}"
+                               Tag="{Binding Key}" Click="DashOptUp_Click" ToolTip="Выше" />
+                    <ui:Button Grid.Column="3" Appearance="Transparent" Icon="{ui:SymbolIcon ChevronDown24}"
+                               Tag="{Binding Key}" Click="DashOptDown_Click" ToolTip="Ниже" />
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <ui:Button Content="Отмена" Margin="0,0,8,0" Click="DashCustomizeCancel_Click" />
+            <ui:Button Content="Применить" Appearance="Primary" Click="DashCustomizeApply_Click" />
+          </StackPanel>
         </StackPanel>
       </Border>
     </Grid>
