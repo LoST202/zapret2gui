@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- UI-less library (process control, file IO, JSON) - no Windows Desktop deps needed. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Zapret.Core</RootNamespace>
+    <AssemblyName>Zapret.Core</AssemblyName>
+  </PropertyGroup>
+
+</Project>

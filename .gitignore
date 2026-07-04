@@ -1,0 +1,10 @@
+# Build output (project uses UseArtifactsOutput -> artifacts/, so no per-project bin/)
+artifacts/
+obj/
+**/obj/
+
+# Publish output assembled by build.bat (contains the exe + a copy of the engine)
+dist/
+
+.vs/
+*.user

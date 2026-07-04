@@ -1,0 +1,19 @@
+<Project>
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Deterministic>true</Deterministic>
+    <!-- Centralize every project's bin/obj into a single <root>/artifacts/ tree instead of
+         scattering bin\ and obj\ under each project. Keeps the repo clean and disk usage in one place. -->
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <!-- NOTE: do NOT enable InvariantGlobalization - WPF data binding resolves the default
+         xml:lang (en-US) culture and crashes under invariant mode. -->
+  </PropertyGroup>
+
+  <!-- Release ships to end users: no symbols on disk. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+</Project>

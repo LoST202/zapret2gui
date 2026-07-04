@@ -1,0 +1,269 @@
+[
+  {
+    "id": "alt",
+    "label": "ALT",
+    "group": "Базовые",
+    "description": "fake + fakedsplit (ts)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6",
+      "--lua-desync=fakedsplit:pos=midsld:pattern=0x00:tcp_ts=-1000"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6",
+      "--lua-desync=fakedsplit:pos=midsld:pattern=0x00:tcp_ts=-1000"
+    ]
+  },
+  {
+    "id": "alt12",
+    "label": "ALT12",
+    "group": "Базовые",
+    "description": "hostfakesplit google (ts) — по умолчанию",
+    "dg": [
+      "--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-1000"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=8",
+      "--lua-desync=fake:blob=tls_max:tcp_ts=-1000:repeats=8",
+      "--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max"
+    ]
+  },
+  {
+    "id": "general",
+    "label": "general",
+    "group": "MULTISPLIT (seqovl)",
+    "description": "seqovl 681",
+    "dg": [
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ],
+    "dgen": [
+      "--lua-desync=multisplit:pos=1:seqovl=568:seqovl_pattern=tls_4pda"
+    ]
+  },
+  {
+    "id": "alt2",
+    "label": "ALT2",
+    "group": "MULTISPLIT (seqovl)",
+    "description": "seqovl 652 (pos2)",
+    "dg": [
+      "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google"
+    ],
+    "dgen": [
+      "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google"
+    ]
+  },
+  {
+    "id": "alt6",
+    "label": "ALT6",
+    "group": "MULTISPLIT (seqovl)",
+    "description": "seqovl 681",
+    "dg": [
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ],
+    "dgen": [
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ]
+  },
+  {
+    "id": "alt7",
+    "label": "ALT7",
+    "group": "MULTISPLIT (seqovl)",
+    "description": "seqovl 679 (sniext)",
+    "dg": [
+      "--lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_google"
+    ],
+    "dgen": [
+      "--lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_google"
+    ]
+  },
+  {
+    "id": "alt11",
+    "label": "ALT11",
+    "group": "MULTISPLIT (seqovl)",
+    "description": "fake + multisplit (ts)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=8",
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=8",
+      "--lua-desync=fake:blob=tls_max:tcp_ts=-1000:repeats=8",
+      "--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max"
+    ]
+  },
+  {
+    "id": "alt9",
+    "label": "ALT9",
+    "group": "HOSTFAKESPLIT",
+    "description": "hostfakesplit (ts + md5)",
+    "dg": [
+      "--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-1000:repeats=4"
+    ],
+    "dgen": [
+      "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4"
+    ]
+  },
+  {
+    "id": "alt3",
+    "label": "ALT3",
+    "group": "HOSTFAKESPLIT",
+    "description": "fake + hostfakesplit (эксперим.)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com",
+      "--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-1000"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=tls_4pda:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=ya.ru",
+      "--lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-1000"
+    ]
+  },
+  {
+    "id": "alt4",
+    "label": "ALT4",
+    "group": "FAKE",
+    "description": "fake + multisplit (badseq)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_seq=1000:repeats=6",
+      "--lua-desync=multisplit:pos=2"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_seq=1000:repeats=6",
+      "--lua-desync=fake:blob=tls_google:tcp_seq=1000:repeats=6",
+      "--lua-desync=multisplit:pos=2"
+    ]
+  },
+  {
+    "id": "alt8",
+    "label": "ALT8",
+    "group": "FAKE",
+    "description": "fake (badseq)",
+    "dg": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:repeats=6"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:repeats=6"
+    ]
+  },
+  {
+    "id": "alt10",
+    "label": "ALT10",
+    "group": "FAKE",
+    "description": "fake (ts)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
+      "--lua-desync=fake:blob=tls_4pda:tcp_ts=-1000:repeats=6"
+    ]
+  },
+  {
+    "id": "auto",
+    "label": "AUTO",
+    "group": "FAKE TLS AUTO",
+    "description": "fake + multidisorder",
+    "dg": [
+      "--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:repeats=11",
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=-10000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=11",
+      "--lua-desync=multidisorder:pos=1,midsld"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:repeats=11",
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=-10000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=11",
+      "--lua-desync=multidisorder:pos=1,midsld"
+    ]
+  },
+  {
+    "id": "autoalt",
+    "label": "AUTO-ALT",
+    "group": "FAKE TLS AUTO",
+    "description": "fake + fakedsplit (badseq)",
+    "dg": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
+      "--lua-desync=fakedsplit:pos=1"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
+      "--lua-desync=fakedsplit:pos=1"
+    ]
+  },
+  {
+    "id": "autoalt2",
+    "label": "AUTO-ALT2",
+    "group": "FAKE TLS AUTO",
+    "description": "fake + multisplit (badseq)",
+    "dg": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=10000000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_seq=10000000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ]
+  },
+  {
+    "id": "autoalt3",
+    "label": "AUTO-ALT3",
+    "group": "FAKE TLS AUTO",
+    "description": "fake + multisplit (ts)",
+    "dg": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=fake_default_tls:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
+      "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
+    ]
+  },
+  {
+    "id": "simple",
+    "label": "SIMPLE",
+    "group": "SIMPLE FAKE",
+    "description": "fake (ts)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6"
+    ]
+  },
+  {
+    "id": "simplealt",
+    "label": "SIMPLE-ALT",
+    "group": "SIMPLE FAKE",
+    "description": "fake (badseq)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_seq=2:repeats=6"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_seq=2:repeats=6",
+      "--lua-desync=fake:blob=tls_google:tcp_seq=2:repeats=6"
+    ]
+  },
+  {
+    "id": "simplealt2",
+    "label": "SIMPLE-ALT2",
+    "group": "SIMPLE FAKE",
+    "description": "fake (ts, max)",
+    "dg": [
+      "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6"
+    ],
+    "dgen": [
+      "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
+      "--lua-desync=fake:blob=tls_max:tcp_ts=-1000:repeats=6"
+    ]
+  },
+  {
+    "id": "alt5",
+    "label": "ALT5",
+    "group": "MULTISPLIT (seqovl)",
+    "description": "восстановлена из v1 — multidisorder (проверьте тестами)",
+    "dg": [
+      "--lua-desync=multidisorder:pos=1,midsld"
+    ],
+    "dgen": [
+      "--lua-desync=multidisorder:pos=1,midsld"
+    ]
+  }
+]

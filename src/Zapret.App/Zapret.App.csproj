@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
+    <RootNamespace>Zapret.App</RootNamespace>
+    <AssemblyName>Zapret</AssemblyName>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Trimming is NOT enabled: unsupported for WPF. Single-file publish is fine
+         (RID/self-contained are passed on the `dotnet publish` command line - see README). -->
+    <!-- The SDK only allows single-file compression for self-contained publishes;
+         it roughly halves the portable bundle. -->
+    <EnableCompressionInSingleFile Condition="'$(SelfContained)' == 'true'">true</EnableCompressionInSingleFile>
+    <!-- Mostly-idle tray app: no background GC thread, heap is tiny so blocking
+         collections are invisible. -->
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 0..9; trades a little throughput for a smaller heap - right call for a resident app. -->
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Zapret.Core\Zapret.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\icon.ico" />
+  </ItemGroup>
+
+  <!-- Ship default strategies/state next to the exe so a fresh install works out of the box.
+       Single source of truth: the repo-root sample-state files. -->
+  <ItemGroup>
+    <None Include="..\..\sample-state\strategies.json" Link="defaults\strategies.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\sample-state\state.json" Link="defaults\state.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <!-- Language-independent service queries for Diagnostics (avoids parsing localized `sc` output). -->
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>
