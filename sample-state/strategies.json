@@ -12,7 +12,8 @@
       "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
       "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6",
       "--lua-desync=fakedsplit:pos=midsld:pattern=0x00:tcp_ts=-1000"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt12",
@@ -26,7 +27,8 @@
       "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=8",
       "--lua-desync=fake:blob=tls_max:tcp_ts=-1000:repeats=8",
       "--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "general",
@@ -38,7 +40,8 @@
     ],
     "dgen": [
       "--lua-desync=multisplit:pos=1:seqovl=568:seqovl_pattern=tls_4pda"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt2",
@@ -50,7 +53,8 @@
     ],
     "dgen": [
       "--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_google"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt6",
@@ -62,7 +66,8 @@
     ],
     "dgen": [
       "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt7",
@@ -74,7 +79,8 @@
     ],
     "dgen": [
       "--lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_google"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt11",
@@ -89,7 +95,8 @@
       "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=8",
       "--lua-desync=fake:blob=tls_max:tcp_ts=-1000:repeats=8",
       "--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=tls_max"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt9",
@@ -101,7 +108,8 @@
     ],
     "dgen": [
       "--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-1000:tcp_md5:repeats=4"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt3",
@@ -115,13 +123,14 @@
     "dgen": [
       "--lua-desync=fake:blob=tls_4pda:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=ya.ru",
       "--lua-desync=hostfakesplit:host=ya.ru:tcp_ts=-1000"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt4",
     "label": "ALT4",
     "group": "FAKE",
-    "description": "fake + multisplit (badseq)",
+    "description": "fake + multisplit (seq)",
     "dg": [
       "--lua-desync=fake:blob=tls_google:tcp_seq=1000:repeats=6",
       "--lua-desync=multisplit:pos=2"
@@ -130,19 +139,21 @@
       "--lua-desync=fake:blob=blob_stun:tcp_seq=1000:repeats=6",
       "--lua-desync=fake:blob=tls_google:tcp_seq=1000:repeats=6",
       "--lua-desync=multisplit:pos=2"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt8",
     "label": "ALT8",
     "group": "FAKE",
-    "description": "fake (badseq)",
+    "description": "fake (seq)",
     "dg": [
       "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:repeats=6"
     ],
     "dgen": [
       "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:repeats=6"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt10",
@@ -155,7 +166,8 @@
     "dgen": [
       "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
       "--lua-desync=fake:blob=tls_4pda:tcp_ts=-1000:repeats=6"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "auto",
@@ -171,13 +183,14 @@
       "--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:repeats=11",
       "--lua-desync=fake:blob=fake_default_tls:tcp_seq=-10000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=11",
       "--lua-desync=multidisorder:pos=1,midsld"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "autoalt",
     "label": "AUTO-ALT",
     "group": "FAKE TLS AUTO",
-    "description": "fake + fakedsplit (badseq)",
+    "description": "fake + fakedsplit (seq)",
     "dg": [
       "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
       "--lua-desync=fakedsplit:pos=1"
@@ -185,13 +198,14 @@
     "dgen": [
       "--lua-desync=fake:blob=fake_default_tls:tcp_seq=2:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
       "--lua-desync=fakedsplit:pos=1"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "autoalt2",
     "label": "AUTO-ALT2",
     "group": "FAKE TLS AUTO",
-    "description": "fake + multisplit (badseq)",
+    "description": "fake + multisplit (seq)",
     "dg": [
       "--lua-desync=fake:blob=fake_default_tls:tcp_seq=10000000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
       "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
@@ -199,7 +213,8 @@
     "dgen": [
       "--lua-desync=fake:blob=fake_default_tls:tcp_seq=10000000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
       "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "autoalt3",
@@ -213,7 +228,8 @@
     "dgen": [
       "--lua-desync=fake:blob=fake_default_tls:tcp_ts=-1000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=8",
       "--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_google"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "simple",
@@ -226,20 +242,22 @@
     "dgen": [
       "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
       "--lua-desync=fake:blob=tls_google:tcp_ts=-1000:repeats=6"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "simplealt",
     "label": "SIMPLE-ALT",
     "group": "SIMPLE FAKE",
-    "description": "fake (badseq)",
+    "description": "fake (seq)",
     "dg": [
       "--lua-desync=fake:blob=tls_google:tcp_seq=2:repeats=6"
     ],
     "dgen": [
       "--lua-desync=fake:blob=blob_stun:tcp_seq=2:repeats=6",
       "--lua-desync=fake:blob=tls_google:tcp_seq=2:repeats=6"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "simplealt2",
@@ -252,7 +270,8 @@
     "dgen": [
       "--lua-desync=fake:blob=blob_stun:tcp_ts=-1000:repeats=6",
       "--lua-desync=fake:blob=tls_max:tcp_ts=-1000:repeats=6"
-    ]
+    ],
+    "autoHostlist": true
   },
   {
     "id": "alt5",
@@ -264,6 +283,7 @@
     ],
     "dgen": [
       "--lua-desync=multidisorder:pos=1,midsld"
-    ]
+    ],
+    "autoHostlist": true
   }
 ]

@@ -5,7 +5,6 @@ public sealed class AppPaths
     public string Root { get; }
     public string BinDir { get; }
     public string ListsDir { get; }
-    public string LuaDir { get; }
     public string StateDir { get; }
     public string StateFile { get; }
     public string StrategiesFile { get; }
@@ -16,15 +15,12 @@ public sealed class AppPaths
         Root = Path.GetFullPath(root);
         BinDir = Path.Combine(Root, "bin");
         ListsDir = Path.Combine(Root, "lists");
-        LuaDir = Path.Combine(Root, "lua");
         StateDir = Path.Combine(Root, "state");
         StateFile = Path.Combine(StateDir, "state.json");
         StrategiesFile = Path.Combine(StateDir, "strategies.json");
         WinwsExe = Path.Combine(BinDir, "winws2.exe");
     }
 
-    public string Bin(string file) => Path.Combine(BinDir, file);
-    public string Lua(string file) => Path.Combine(LuaDir, file);
     public string List(string file) => Path.Combine(ListsDir, file);
 
     public static AppPaths Discover()

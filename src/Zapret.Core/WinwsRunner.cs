@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CliWrap;
 
 namespace Zapret.Core;
 
@@ -39,7 +40,7 @@ public sealed class WinwsRunner : IDisposable
                 "or set the ZAPRET_ROOT environment variable.", _paths.WinwsExe);
 
         KillStrayEngines();
-        EnableTcpTimestamps();
+        await EnableTcpTimestampsAsync().ConfigureAwait(false);
 
         var args = CommandParser.ForStrategy(_paths, strategy);
 
@@ -154,7 +155,7 @@ public sealed class WinwsRunner : IDisposable
 
         Current = null;
         StartedAt = null;
-        await RemoveDriverAsync(ct).ConfigureAwait(false);
+        await RemoveDriverAsync().ConfigureAwait(false);
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -167,7 +168,19 @@ public sealed class WinwsRunner : IDisposable
     private void OnExited(object? sender, EventArgs e)
     {
         Strategy? crashed;
-        lock (_gate) { crashed = Current; Current = null; }
+        lock (_gate)
+        {
+            // A stale Exited callback can arrive after the process was superseded: StartAsync only
+            // detaches OnExited (via StopAsync) when IsRunning was true, so a spontaneously-crashed
+            // process is never detached. Ignore anything that isn't the process we currently track,
+            // otherwise we'd null the NEW Current and raise Crashed for the wrong strategy.
+            if (sender is not Process p || !ReferenceEquals(p, _process))
+                return;
+            p.Dispose();
+            _process = null;
+            crashed = Current;
+            Current = null;
+        }
         StartedAt = null;
         StateChanged?.Invoke(this, EventArgs.Empty);
         _ = RemoveDriverAsync();
@@ -185,48 +198,36 @@ public sealed class WinwsRunner : IDisposable
         }
     }
 
-    private static void EnableTcpTimestamps() =>
-        RunHidden("netsh", "interface", "tcp", "set", "global", "timestamps=enabled");
+    // TCP timestamps (RFC 1323) are required by ts-based desync strategies.
+    private static Task EnableTcpTimestampsAsync() =>
+        RunQuietAsync("netsh", "interface", "tcp", "set", "global", "timestamps=enabled");
 
-    private static async Task RemoveDriverAsync(CancellationToken ct = default)
+    private static async Task RemoveDriverAsync()
     {
-        await RunHiddenAsync(ct, "sc", "stop", "WinDivert").ConfigureAwait(false);
-        await RunHiddenAsync(ct, "sc", "delete", "WinDivert").ConfigureAwait(false);
+        await RunQuietAsync("sc", "stop", "WinDivert").ConfigureAwait(false);
+        await RunQuietAsync("sc", "delete", "WinDivert").ConfigureAwait(false);
     }
 
-    private static void RunHidden(string exe, params string[] args)
-    {
-        try { using var p = Process.Start(MakePsi(exe, args)); p?.WaitForExit(5000); }
-        catch { }
-    }
-
-    private static async Task RunHiddenAsync(CancellationToken ct, string exe, params string[] args)
+    // Fire a short-lived hidden CLI command, discard its output, never throw. Bounded so a
+    // stuck sc/netsh can't hang engine start/stop.
+    private static async Task RunQuietAsync(string exe, params string[] args)
     {
         try
         {
-            using var p = Process.Start(MakePsi(exe, args));
-            if (p is not null) await p.WaitForExitAsync(ct).ConfigureAwait(false);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            await Cli.Wrap(exe)
+                .WithArguments(args)
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteAsync(cts.Token)
+                .ConfigureAwait(false);
         }
         catch { }
     }
 
-    private static ProcessStartInfo MakePsi(string exe, string[] args)
-    {
-        var psi = new ProcessStartInfo(exe)
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (var arg in args)
-            psi.ArgumentList.Add(arg);
-        return psi;
-    }
-
     public void Dispose()
     {
-        try { StopAsync().GetAwaiter().GetResult(); }
+        // Bounded: never hang the UI thread on exit if the WinDivert teardown stalls.
+        try { StopAsync().Wait(TimeSpan.FromSeconds(5)); }
         catch { }
     }
 }

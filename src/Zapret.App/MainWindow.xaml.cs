@@ -38,6 +38,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private CancellationTokenSource? _autoPickCts;
     private readonly DispatcherTimer _uptimeTimer;
 
+    private readonly LinkedList<string> _logLines = new();
+    private const int MaxLogLines = 800;
+    private bool _journalOpen;
+
     private Dictionary<string, FrameworkElement>? _navPages;
     private bool _navCollapsedByUser;
     private const double NavCollapseThreshold = 760;
@@ -59,7 +63,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private SysNet? _sysCache;
     private ObservableCollection<DashCardOption> _dashOpts = new();
 
-    private const string AppVersion = "1.0.0";
+    private const string AppVersion = "1.0.1";
 
     public MainWindow()
     {
@@ -138,11 +142,27 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         UpdateStatus();
         ShowPage("dashboard");
 
-        SizeChanged += (_, _) => ApplyAdaptiveNav();
+        SizeChanged += (_, _) => { ApplyAdaptiveNav(); ApplyAdaptiveDash(); };
+
+        // Don't tick the uptime/usage timer while hidden in the tray (most of the app's life).
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible && _runner.IsRunning)
+            {
+                UpdateUptime();
+                if (!_uptimeTimer.IsEnabled)
+                    _uptimeTimer.Start();
+            }
+            else
+            {
+                _uptimeTimer.Stop();
+            }
+        };
 
         Loaded += (_, _) =>
         {
             ApplyAdaptiveNav();
+            ApplyAdaptiveDash();
             UpdateListCounts();
             if (_state.Config.StartMinimized)
             {
@@ -659,7 +679,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private async void Update_Click(object sender, RoutedEventArgs e)
     {
         var btn = sender as System.Windows.Controls.Control;
-        if (btn is not null) btn.IsEnabled = false;
+        btn?.IsEnabled = false;
 
         ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Informational;
         ListsInfoBar.Title = "Обновление списка IP…";
@@ -671,13 +691,20 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("Zapret2/1.0");
-            var data = await http.GetByteArrayAsync(IpsetUpdateUrl);
-            if (data.Length == 0)
-                throw new Exception("получен пустой файл");
 
             Directory.CreateDirectory(_paths.ListsDir);
             var tmp = target + ".tmp";
-            await File.WriteAllBytesAsync(tmp, data);
+            using (var resp = await http.GetAsync(IpsetUpdateUrl, HttpCompletionOption.ResponseHeadersRead))
+            {
+                resp.EnsureSuccessStatusCode();
+                await using var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None);
+                await resp.Content.CopyToAsync(fs);
+            }
+            if (new FileInfo(tmp).Length == 0)
+            {
+                File.Delete(tmp);
+                throw new Exception("получен пустой файл");
+            }
             File.Move(tmp, target, overwrite: true);
 
             LoadListsPage();
@@ -691,6 +718,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         catch (Exception ex)
         {
+            try { File.Delete(target + ".tmp"); } catch { } // don't leave a half-downloaded temp file
             ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Error;
             ListsInfoBar.Title = "Не удалось обновить список";
             ListsInfoBar.Message = ex.Message;
@@ -698,7 +726,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
         finally
         {
-            if (btn is not null) btn.IsEnabled = true;
+            btn?.IsEnabled = true;
+            _ = Task.Run(MemoryTrimmer.Trim); // return the download spike to the OS off the UI thread
         }
     }
 
@@ -927,6 +956,47 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         else if (_navCollapsed && !_navCollapsedByUser)
         {
             SetNavCollapsed(false);
+        }
+    }
+
+    private bool _dashStacked;
+    private const double DashStackThreshold = 1100;
+
+    // When the window is narrow, reflow the dashboard from two columns (hero | cards)
+    // to one (hero on top, cards full-width below) so nothing gets squeezed or clipped.
+    private void ApplyAdaptiveDash()
+    {
+        if (DashboardPanel is null || HeroCard is null || DashRight is null)
+            return;
+
+        var stack = ActualWidth < DashStackThreshold;
+        if (stack == _dashStacked && DashboardPanel.ColumnDefinitions.Count > 0)
+            return;
+        _dashStacked = stack;
+
+        DashboardPanel.ColumnDefinitions.Clear();
+        DashboardPanel.RowDefinitions.Clear();
+
+        if (stack)
+        {
+            DashboardPanel.ColumnDefinitions.Add(new ColumnDefinition());
+            DashboardPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            DashboardPanel.RowDefinitions.Add(new RowDefinition());
+            Grid.SetColumn(HeroCard, 0); Grid.SetRow(HeroCard, 0);
+            Grid.SetColumn(DashRight, 0); Grid.SetRow(DashRight, 1);
+            HeroCard.HorizontalAlignment = HorizontalAlignment.Center;
+            HeroCard.Margin = new Thickness(0, 0, 0, 12);
+            DashRight.Margin = new Thickness(0);
+        }
+        else
+        {
+            DashboardPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            DashboardPanel.ColumnDefinitions.Add(new ColumnDefinition());
+            Grid.SetColumn(HeroCard, 0); Grid.SetRow(HeroCard, 0);
+            Grid.SetColumn(DashRight, 1); Grid.SetRow(DashRight, 0);
+            HeroCard.HorizontalAlignment = HorizontalAlignment.Left;
+            HeroCard.Margin = new Thickness(0);
+            DashRight.Margin = new Thickness(16, 0, 0, 0);
         }
     }
 
@@ -1250,6 +1320,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 panel.Visibility = Visibility.Collapsed;
             }
         }
+
+        _journalOpen = tag == "journal";
+        if (_journalOpen)
+            RenderLog();
 
         if (tag == "lists")
             LoadListsPage();
@@ -1643,8 +1717,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (running)
         {
             UpdateUptime();
-            if (!_uptimeTimer.IsEnabled)
+            if (IsVisible && !_uptimeTimer.IsEnabled)
                 _uptimeTimer.Start();
+            else if (!IsVisible)
+                _uptimeTimer.Stop();
         }
         else
         {
@@ -1717,8 +1793,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         AppendLog("Ошибка: " + ex.Message);
     }
 
-    private void ClearLog_Click(object sender, RoutedEventArgs e) => LogBox.Clear();
+    private void ClearLog_Click(object sender, RoutedEventArgs e)
+    {
+        _logLines.Clear();
+        LogBox.Clear();
+    }
 
+    // Keep the log in a bounded in-memory buffer; only materialize it into the TextBox
+    // while the Journal page is actually open. When it's not (idle in tray — 99% of the
+    // time), appending an engine line is just a LinkedList add, with no big string churn.
     private void AppendLog(string line)
     {
         if (!Dispatcher.CheckAccess())
@@ -1726,9 +1809,16 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             Dispatcher.BeginInvoke(new Action(() => AppendLog(line)));
             return;
         }
-        LogBox.AppendText(line + Environment.NewLine);
-        if (LogBox.Text.Length > 100_000)
-            LogBox.Text = LogBox.Text[^50_000..];
+        _logLines.AddLast(line);
+        while (_logLines.Count > MaxLogLines)
+            _logLines.RemoveFirst();
+        if (_journalOpen)
+            RenderLog();
+    }
+
+    private void RenderLog()
+    {
+        LogBox.Text = string.Join(Environment.NewLine, _logLines);
         LogBox.CaretIndex = LogBox.Text.Length;
         LogBox.ScrollToEnd();
     }

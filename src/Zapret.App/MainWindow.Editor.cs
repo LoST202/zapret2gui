@@ -22,6 +22,7 @@ public partial class MainWindow
     private Popup? _hintPopup;
     private TextBlock? _hintText;
     private CollectionViewSource? _refView;
+    private ToolTip? _hoverTip;
 
     // Wire up the winws2 code editor: syntax highlighting, context-aware autocomplete,
     // a floating parameter hint (VS Code style), and the argument reference palette.
@@ -45,6 +46,8 @@ public partial class MainWindow
         EditArgs.TextArea.TextEntered += Editor_TextEntered;
         EditArgs.TextArea.Caret.PositionChanged += (_, _) => UpdateEditorHint();
         EditArgs.TextArea.LostKeyboardFocus += (_, _) => HideHint();
+        EditArgs.TextArea.TextView.MouseHover += Editor_MouseHover;
+        EditArgs.TextArea.TextView.MouseHoverStopped += (_, _) => _hoverTip?.IsOpen = false;
         EditArgs.TextArea.TextView.ScrollOffsetChanged += (_, _) => { if (_hintPopup?.IsOpen == true) PositionHint(); };
         EditArgs.TextArea.PreviewKeyDown += (_, e) =>
         {
@@ -185,7 +188,7 @@ public partial class MainWindow
         var line = doc.GetLineByOffset(caret);
         var text = doc.GetText(line.Offset, caret - line.Offset);
 
-        var flags = Regex.Matches(text, "--[a-z0-9\\-]+", RegexOptions.IgnoreCase);
+        var flags = FlagTokenRegex().Matches(text);
         if (flags.Count == 0)
         {
             HideHint();
@@ -203,7 +206,7 @@ public partial class MainWindow
         var hint = $"{flag.Name}  —  {flag.Hint}";
         if (flagName.Equals("--lua-desync", StringComparison.OrdinalIgnoreCase))
         {
-            var m = Regex.Match(text, "--lua-desync=([a-z_]+)", RegexOptions.IgnoreCase);
+            var m = LuaDesyncMethodRegex().Match(text);
             if (m.Success && WinwsSyntax.FindMethod(m.Groups[1].Value) is { } method)
                 hint = $"{method.Name}  —  {method.Hint}";
         }
@@ -230,10 +233,122 @@ public partial class MainWindow
         catch { /* visual lines not ready yet */ }
     }
 
-    private void HideHint()
+    private void HideHint() => _hintPopup?.IsOpen = false;
+
+    // ===== Hover tooltip (VS Code style) =====
+
+    private void Editor_MouseHover(object sender, MouseEventArgs e)
     {
-        if (_hintPopup is not null)
-            _hintPopup.IsOpen = false;
+        var pos = EditArgs.GetPositionFromPoint(e.GetPosition(EditArgs));
+        if (pos is null)
+            return;
+
+        var item = ResolveTokenAt(EditArgs.Document.GetOffset(pos.Value.Location));
+        if (item is null)
+            return;
+
+        _hoverTip ??= new ToolTip { Placement = PlacementMode.Mouse };
+        _hoverTip.Content = BuildTipContent(item);
+        _hoverTip.IsOpen = true;
+        e.Handled = true;
+    }
+
+    // Expand the offset to a whole token and match it to its reference entry. Bare names can be
+    // shared across grammar roles (host is a param AND a pos value; stun is an L7 filter AND a
+    // payload; wsize is a desync method AND a param), so resolve by surrounding context rather than
+    // a flat lookup that would always surface the first-registered meaning.
+    private WinwsItem? ResolveTokenAt(int offset)
+    {
+        var doc = EditArgs.Document;
+        static bool IsWord(char c) => char.IsLetterOrDigit(c) || c is '-' or '_';
+
+        int start = offset, end = offset;
+        while (start > 0 && IsWord(doc.GetCharAt(start - 1)))
+            start--;
+        while (end < doc.TextLength && IsWord(doc.GetCharAt(end)))
+            end++;
+        if (end <= start)
+            return null;
+
+        var word = doc.GetText(start, end - start);
+        if (word.Length == 0)
+            return null;
+
+        // A whole "--flag" token resolves directly.
+        if (word.StartsWith("--", StringComparison.Ordinal))
+            return WinwsSyntax.Lookup(word);
+
+        // Otherwise resolve within the role implied by the CLI token this word sits in.
+        var tokStart = start;
+        while (tokStart > 0 && !char.IsWhiteSpace(doc.GetCharAt(tokStart - 1)))
+            tokStart--;
+        var prefix = doc.GetText(tokStart, start - tokStart);
+        return ResolveByContext(prefix, word) ?? WinwsSyntax.Lookup(word);
+    }
+
+    // Resolve a bare name from the flag-value prefix that precedes it on the line.
+    private static WinwsItem? ResolveByContext(string prefix, string word)
+    {
+        var eq = prefix.IndexOf('=');
+        if (eq < 0)
+            return null;
+
+        var flag = prefix[..eq];
+        if (flag.Equals("--filter-l7", StringComparison.OrdinalIgnoreCase))
+            return FindIn(WinwsSyntax.L7, word);
+        if (flag.Equals("--payload", StringComparison.OrdinalIgnoreCase))
+            return FindIn(WinwsSyntax.Payloads, word);
+        if (!flag.Equals("--lua-desync", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        // Inside --lua-desync=<method>[:<param>[=<value>]]…
+        var val = prefix[(eq + 1)..];
+        var colon = val.LastIndexOf(':');
+        if (colon < 0)
+            return WinwsSyntax.FindMethod(word);        // first segment: the desync method
+
+        var seg = val[(colon + 1)..];                   // current ":"-delimited param segment
+        var peq = seg.IndexOf('=');
+        if (peq < 0)
+            return FindIn(WinwsSyntax.Params, word);    // a param name
+
+        var set = WinwsSyntax.ValuesForParam(seg[..peq]);
+        return set is null ? null : FindIn(set, word);  // a param value (e.g. pos=host)
+    }
+
+    private static WinwsItem? FindIn(WinwsItem[] arr, string name)
+    {
+        foreach (var it in arr)
+            if (it.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return it;
+        return null;
+    }
+
+    private static object BuildTipContent(WinwsItem item)
+    {
+        var panel = new StackPanel { MaxWidth = 480 };
+
+        var title = new TextBlock
+        {
+            Text = item.Name,
+            FontFamily = new FontFamily("Consolas"),
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 3),
+        };
+        title.SetResourceReference(TextBlock.ForegroundProperty, "AccentTextFillColorPrimaryBrush");
+        panel.Children.Add(title);
+
+        var body = new TextBlock { Text = item.Hint, TextWrapping = TextWrapping.Wrap, FontSize = 12 };
+        body.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        panel.Children.Add(body);
+
+        if (item.Group.Length > 0)
+        {
+            var grp = new TextBlock { Text = item.Group, FontSize = 10, Margin = new Thickness(0, 5, 0, 0) };
+            grp.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorTertiaryBrush");
+            panel.Children.Add(grp);
+        }
+        return panel;
     }
 
     // ===== Argument reference palette =====
@@ -283,6 +398,13 @@ public partial class MainWindow
             EditArgs.Focus();
         }
     }
+
+    // Source-generated (compile-time) regexes — no runtime pattern compilation on the caret hot path.
+    [GeneratedRegex(@"--[a-z0-9\-]+", RegexOptions.IgnoreCase)]
+    private static partial Regex FlagTokenRegex();
+
+    [GeneratedRegex(@"--lua-desync=([a-z_]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex LuaDesyncMethodRegex();
 }
 
 internal sealed class CompletionItemData : ICompletionData
@@ -293,8 +415,29 @@ internal sealed class CompletionItemData : ICompletionData
 
     public ImageSource? Image => null;
     public string Text => _item.Name;
-    public object Content => _item.Name;
-    public object Description => _item.Hint;
+
+    public object Content
+    {
+        get
+        {
+            if (_item.Group.Length == 0)
+                return _item.Name;
+            var panel = new StackPanel { Orientation = Orientation.Horizontal };
+            panel.Children.Add(new TextBlock { Text = _item.Name });
+            panel.Children.Add(new TextBlock
+            {
+                Text = "  " + _item.Group,
+                Opacity = 0.55,
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            return panel;
+        }
+    }
+
+    public object Description =>
+        new TextBlock { Text = _item.Hint, TextWrapping = TextWrapping.Wrap, MaxWidth = 420 };
+
     public double Priority => 0;
 
     public void Complete(TextArea textArea, ISegment completionSegment, EventArgs insertionRequestEventArgs)

@@ -36,6 +36,13 @@ public static class CommandParser
         var args = new List<string>(tokens.Count);
         for (var i = start; i < tokens.Count; i++)
             args.Add(ReplaceCI(tokens[i], "%~dp0", root));
+
+        // A non-empty command that yields no args (e.g. winws2.exe is the last token) would spawn
+        // the engine with no filters — it exits instantly and is misreported as a crash, kicking off
+        // the retry loop. Fail loudly instead so the real cause is visible.
+        if (args.Count == 0 && joined.Length > 0)
+            throw new InvalidOperationException(
+                "Стратегия не содержит аргументов после winws — команда пуста или задан только путь к winws2.exe.");
         return args;
     }
 

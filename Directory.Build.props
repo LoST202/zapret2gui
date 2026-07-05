@@ -4,6 +4,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <Deterministic>true</Deterministic>
+    <!-- Keep in sync with AppVersion in MainWindow.xaml.cs (the string shown on the About page). -->
+    <Version>1.0.1</Version>
     <!-- Centralize every project's bin/obj into a single <root>/artifacts/ tree instead of
          scattering bin\ and obj\ under each project. Keeps the repo clean and disk usage in one place. -->
     <UseArtifactsOutput>true</UseArtifactsOutput>

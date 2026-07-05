@@ -9,7 +9,9 @@ public static class Autostart
     public static bool IsEnabled() => Run("/Query", "/TN", TaskName) == 0;
 
     public static bool Enable(string exePath) =>
-        Run("/Create", "/TN", TaskName, "/TR", exePath, "/SC", "ONLOGON", "/RL", "HIGHEST", "/F") == 0;
+        // Quote the path inside the /TR value: schtasks stores the action string verbatim and
+        // splits it on spaces at logon, so an unquoted "C:\Program Files\..." path never launches.
+        Run("/Create", "/TN", TaskName, "/TR", "\"" + exePath + "\"", "/SC", "ONLOGON", "/RL", "HIGHEST", "/F") == 0;
 
     public static bool Disable() => Run("/Delete", "/TN", TaskName, "/F") == 0;
 

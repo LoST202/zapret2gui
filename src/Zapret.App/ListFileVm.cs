@@ -1,19 +1,31 @@
-using System.ComponentModel;
 using System.Windows;
+using CommunityToolkit.Mvvm.ComponentModel;
 using Zapret.Core;
 
 namespace Zapret.App;
 
-internal sealed class ListFileVm : INotifyPropertyChanged
+internal sealed partial class ListFileVm : ObservableObject
 {
     public string FileName { get; }
     public string FullPath { get; }
     public bool Loaded { get; private set; }
 
+    [ObservableProperty]
     private string _content = "";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(Header))]
     private int _count;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ProblemVisibility))]
+    [NotifyPropertyChangedFor(nameof(BadBadge))]
     private int _badCount;
+
+    [ObservableProperty]
     private bool _isSelected;
+
+    [ObservableProperty]
     private string _note = "";
 
     public ListFileVm(string fileName, string fullPath, int count, int badCount, string note)
@@ -25,48 +37,9 @@ internal sealed class ListFileVm : INotifyPropertyChanged
         _note = note ?? "";
     }
 
-    public string Content
-    {
-        get => _content;
-        set { _content = value ?? ""; OnChanged(nameof(Content)); }
-    }
-
-    public int Count
-    {
-        get => _count;
-        set { _count = value; OnChanged(nameof(Header)); }
-    }
-
-    public int BadCount
-    {
-        get => _badCount;
-        set
-        {
-            _badCount = value;
-            OnChanged(nameof(BadCount));
-            OnChanged(nameof(HasProblem));
-            OnChanged(nameof(ProblemVisibility));
-            OnChanged(nameof(BadBadge));
-        }
-    }
-
-    public bool IsSelected
-    {
-        get => _isSelected;
-        set { _isSelected = value; OnChanged(nameof(IsSelected)); }
-    }
-
-    public string Note
-    {
-        get => _note;
-        set { _note = value ?? ""; OnChanged(nameof(Note)); }
-    }
-
     public string Header => $"{FileName}    ·    {Count} строк";
-
-    public bool HasProblem => _badCount > 0;
-    public Visibility ProblemVisibility => _badCount > 0 ? Visibility.Visible : Visibility.Collapsed;
-    public string BadBadge => $"⚠ {_badCount}";
+    public Visibility ProblemVisibility => BadCount > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public string BadBadge => $"⚠ {BadCount}";
 
     public void Load()
     {
@@ -75,7 +48,4 @@ internal sealed class ListFileVm : INotifyPropertyChanged
         Content = UserLists.ReadText(FullPath);
         Loaded = true;
     }
-
-    public event PropertyChangedEventHandler? PropertyChanged;
-    private void OnChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

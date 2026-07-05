@@ -59,6 +59,11 @@ public static class Diagnostics
         if (HostsHasYouTube())
             items.Add(new DiagItem("Файл hosts", DiagLevel.Warn, "содержит записи youtube.com/youtu.be — могут мешать доступу"));
 
+        foreach (var svc in services)
+        {
+            try { svc.Dispose(); }
+            catch { }
+        }
         return items;
     }
 
@@ -332,7 +337,6 @@ public sealed record TestResult(string Name, bool Ok, string Detail);
 
 public sealed class TestProgress
 {
-    public int Done { get; init; }
     public int Total { get; init; }
     public TestResult? Result { get; init; }
 }
@@ -358,7 +362,6 @@ public static class RestrictionTester
     {
         var targets = DefaultTargets;
         var results = new List<TestResult>(targets.Count);
-        var done = 0;
 
         var handler = new SocketsHttpHandler
         {
@@ -379,8 +382,7 @@ public static class RestrictionTester
             lock (results)
             {
                 results.Add(r);
-                done++;
-                progress.Report(new TestProgress { Done = done, Total = targets.Count, Result = r });
+                progress.Report(new TestProgress { Total = targets.Count, Result = r });
             }
             return r;
         });
@@ -397,7 +399,14 @@ public static class RestrictionTester
             using var req = new HttpRequestMessage(HttpMethod.Get, t.Url);
             using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             sw.Stop();
-            return new TestResult(t.Name, true, $"доступно · {(int)resp.StatusCode} · {sw.ElapsedMilliseconds} мс");
+            var code = (int)resp.StatusCode;
+            // AllowAutoRedirect=false, so 3xx are genuine redirects from a reachable host. A DPI box
+            // often injects a 403/451 blockpage on a blocked site — that must not read as "доступно".
+            if (code is 403 or 451)
+                return new TestResult(t.Name, false, $"заблокировано · {code}");
+            if (code >= 400)
+                return new TestResult(t.Name, false, $"недоступно · {code}");
+            return new TestResult(t.Name, true, $"доступно · {code} · {sw.ElapsedMilliseconds} мс");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
@@ -427,13 +436,11 @@ public static class DpiChecker
     private const string SuiteUrl = "https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/suite.v2.json";
     private const int PayloadBytes = 64 * 1024;
 
-    private static List<(string Id, string Provider, string Host)>? _suite;
+    private static List<(string Provider, string Host)>? _suite;
 
     private sealed class SuiteEntry
     {
-        public string? Id { get; set; }
         public string? Provider { get; set; }
-        public string? Country { get; set; }
         public string? Host { get; set; }
     }
 
@@ -459,7 +466,6 @@ public static class DpiChecker
         };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) };
 
-        var done = 0;
         var tasks = suite.Select(async e =>
         {
             var name = string.IsNullOrWhiteSpace(e.Provider) ? e.Host : e.Provider;
@@ -467,8 +473,7 @@ public static class DpiChecker
             lock (results)
             {
                 results.Add(r);
-                done++;
-                progress.Report(new TestProgress { Done = done, Total = suite.Count, Result = r });
+                progress.Report(new TestProgress { Total = suite.Count, Result = r });
             }
             return r;
         });
@@ -490,7 +495,7 @@ public static class DpiChecker
         catch (Exception) { return new TestResult(name, false, "сброс / ошибка соединения"); }
     }
 
-    private static async Task<List<(string Id, string Provider, string Host)>> GetSuiteAsync(CancellationToken ct)
+    private static async Task<List<(string Provider, string Host)>> GetSuiteAsync(CancellationToken ct)
     {
         if (_suite is not null)
             return _suite;
@@ -501,13 +506,18 @@ public static class DpiChecker
             var json = await http.GetStringAsync(SuiteUrl, ct).ConfigureAwait(false);
             var entries = JsonSerializer.Deserialize<List<SuiteEntry>>(json,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            _suite = entries?
+            var list = entries?
                 .Where(e => !string.IsNullOrWhiteSpace(e.Host))
-                .Select(e => (e.Id ?? "", e.Provider ?? "", e.Host!))
-                .ToList() ?? new List<(string, string, string)>();
-        }
-        catch { _suite = new List<(string, string, string)>(); }
+                .Select(e => (e.Provider ?? "", e.Host!))
+                .ToList() ?? new List<(string, string)>();
 
-        return _suite;
+            // Only cache a real result. A transient network failure (or an empty payload) must NOT
+            // poison the cache for the whole app lifetime — the DPI check runs precisely when the
+            // network is flaky (during an engine toggle), so return it transiently and retry next time.
+            if (list.Count > 0)
+                _suite = list;
+            return list;
+        }
+        catch { return new List<(string, string)>(); }
     }
 }

@@ -145,7 +145,7 @@
                    Click="NavToggle_Click" ToolTip="Свернуть меню" />
 
         <StackPanel Grid.Row="1">
-          <RadioButton x:Name="NavHome" Style="{StaticResource NavItem}" Tag="dashboard"
+          <RadioButton Style="{StaticResource NavItem}" Tag="dashboard"
                        IsChecked="True" Checked="Nav_Checked" ToolTip="Главная">
             <Grid>
               <Grid.ColumnDefinitions>
@@ -198,7 +198,7 @@
           </RadioButton>
         </StackPanel>
 
-        <RadioButton x:Name="NavSettings" Grid.Row="2" Style="{StaticResource NavItem}" Tag="settings"
+        <RadioButton Grid.Row="2" Style="{StaticResource NavItem}" Tag="settings"
                      Checked="Nav_Checked" ToolTip="Настройки">
           <Grid>
             <Grid.ColumnDefinitions>
@@ -284,7 +284,7 @@
           </Border>
 
           <!-- ===== Feature cards (composable) ===== -->
-          <Grid Grid.Column="1" Margin="16,0,0,0">
+          <Grid x:Name="DashRight" Grid.Column="1" Margin="16,0,0,0">
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
               <RowDefinition Height="*" />
@@ -307,10 +307,10 @@
                     </StackPanel>
                     <TextBlock x:Name="ListCountsText" Margin="0,8,0,0" FontSize="14" Text="списки…"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                      <ui:Button Content="Открыть" Margin="0,0,8,0" Click="NavToLists_Click" />
-                      <ui:Button Content="Обновить IP" Icon="{ui:SymbolIcon ArrowClockwise24}" Click="Update_Click" />
-                    </StackPanel>
+                    <WrapPanel Margin="0,8,0,0">
+                      <ui:Button Content="Открыть" Margin="0,4,8,4" Click="NavToLists_Click" />
+                      <ui:Button Content="Обновить IP" Icon="{ui:SymbolIcon ArrowClockwise24}" Margin="0,4,0,4" Click="Update_Click" />
+                    </WrapPanel>
                   </StackPanel>
                 </Border>
 
@@ -374,13 +374,18 @@
                       <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0">
-                      <StackPanel Orientation="Horizontal">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="Bookmark24" FontSize="18" VerticalAlignment="Center"
                                        Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
                         <TextBlock Text="Профили" Margin="10,0,0,0" VerticalAlignment="Center" FontSize="16"
-                                   FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                                   FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
                       </StackPanel>
-                      <ui:Button HorizontalAlignment="Right" Appearance="Transparent" Content="Сохранить текущий"
+                      <ui:Button Grid.Column="1" Appearance="Transparent" Content="Сохранить текущий"
                                  Icon="{ui:SymbolIcon Add24}" FontSize="12" Click="ProfileAdd_Click"
                                  ToolTip="Сохранить текущую стратегию как профиль" />
                     </Grid>
@@ -586,7 +591,7 @@
                                          Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
                 </Border>
 
-                <Expander x:Name="RefExpander" Margin="0,10,0,0" IsExpanded="False"
+                <Expander Margin="0,10,0,0" IsExpanded="False"
                           Header="Справочник аргументов — поиск и клик для вставки">
                   <StackPanel Margin="0,8,0,0">
                     <ui:TextBox x:Name="RefSearch" Icon="{ui:SymbolIcon Search24}" Margin="0,0,0,8"
@@ -966,7 +971,7 @@
                       KeyDown="ProfileNameBox_KeyDown" />
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
             <ui:Button Content="Отмена" Margin="0,0,8,0" Click="ProfileNameCancel_Click" />
-            <ui:Button x:Name="ProfileNameSaveBtn" Content="Сохранить" Appearance="Primary"
+            <ui:Button Content="Сохранить" Appearance="Primary"
                        Click="ProfileNameSave_Click" />
           </StackPanel>
         </StackPanel>

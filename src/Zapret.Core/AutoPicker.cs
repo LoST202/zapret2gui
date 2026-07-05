@@ -33,6 +33,15 @@ public sealed class AutoPicker
         var total = candidates.Count;
         progress?.Report(new AutoPickProgress(AutoPickPhase.Started, "", 0, total, null));
 
+        using var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            UseProxy = false,
+            ConnectTimeout = TimeSpan.FromMilliseconds(_timeoutMs),
+        };
+        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(_timeoutMs) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0");
+
         var i = 0;
         foreach (var s in candidates)
         {
@@ -59,7 +68,7 @@ public sealed class AutoPicker
                 continue;
             }
 
-            var ok = await ProbeAsync(ct).ConfigureAwait(false);
+            var ok = await ProbeAsync(http, ct).ConfigureAwait(false);
             progress?.Report(new AutoPickProgress(
                 ok ? AutoPickPhase.Passed : AutoPickPhase.Failed, s.Label, i, total, ok ? s : null));
 
@@ -74,17 +83,8 @@ public sealed class AutoPicker
         return null;
     }
 
-    private async Task<bool> ProbeAsync(CancellationToken ct)
+    private async Task<bool> ProbeAsync(HttpClient http, CancellationToken ct)
     {
-        using var handler = new SocketsHttpHandler
-        {
-            AllowAutoRedirect = false,
-            UseProxy = false,
-            ConnectTimeout = TimeSpan.FromMilliseconds(_timeoutMs),
-        };
-        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(_timeoutMs) };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0");
-
         foreach (var target in _targets)
         {
             using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
