@@ -48,3 +48,13 @@ betterttv.net
 localizeapi.com
 klipy.com
 live-video.net
+discord.com
+discord.gg
+discordapp.com
+discordapp.net
+discord.media
+gateway.discord.gg
+cdn.discordapp.com
+media.discordapp.net
+dis.gd
+discordstatus.com

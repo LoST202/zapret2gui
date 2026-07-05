@@ -62,6 +62,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool _sysLoading;
     private SysNet? _sysCache;
     private ObservableCollection<DashCardOption> _dashOpts = new();
+    private int _editPrevIndex = -1;   // editor: last-selected index, to flush its form edits on selection change
 
     private const string AppVersion = "1.0.1";
 
@@ -72,10 +73,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _paths = AppPaths.Discover();
         _state = AppState.Load(_paths.StateFile);
         _catalog = StrategyCatalog.Load(_paths.StrategiesFile);
-        if (_catalog.Strategies.Any(s => string.IsNullOrWhiteSpace(s.Command)))
+        // One-time migration of legacy Dg/Dgen strategies into a full-command array (like a .bat).
+        // Trigger ONLY on Command==null (a legacy file with no "command" key), never on an empty array —
+        // an intentionally-blank command must not be overwritten with the default template every startup.
+        if (!_catalog.LoadFailed && _catalog.Strategies.Any(s => s.Command is null))
         {
             var migrated = _catalog.Strategies
-                .Select(s => string.IsNullOrWhiteSpace(s.Command) ? s with { Command = CommandBuilder.ToText(s) } : s)
+                .Select(s => s.Command is null
+                    ? s with { Command = CommandBuilder.ToText(s).Replace("\r\n", "\n").Split('\n'), Dg = null, Dgen = null }
+                    : s)
                 .ToList();
             try { StrategyCatalog.Save(_paths.StrategiesFile, migrated); } catch { }
             _catalog = StrategyCatalog.Load(_paths.StrategiesFile);
@@ -84,6 +90,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _runner.StateChanged += (_, _) => Dispatcher.BeginInvoke(new Action(UpdateStatus));
         _runner.Output += (_, line) => Dispatcher.BeginInvoke(new Action(() => AppendLog(line)));
         _runner.Crashed += (_, s) => Dispatcher.BeginInvoke(new Action(() => OnEngineCrashed(s)));
+
+        // Exit_Click is the only tray-menu teardown; also tear down on a Windows session-end (logoff /
+        // shutdown / restart) so the notify icon and the WinDivert driver don't leak.
+        Application.Current.SessionEnding += (_, _) =>
+        {
+            try { _runner.Dispose(); } catch { }
+            try { Tray.Dispose(); } catch { }
+        };
 
         ApplyTheme(_state.Config.Theme);
         ApplyFont();
@@ -292,10 +306,19 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (s is null)
             return;
 
+        if (_busy)
+        {
+            // An engine op is in flight. Persisting the new id but not restarting would make the combo,
+            // config and running engine diverge. Revert the combo to what's actually current and bail.
+            AppendLog("Подождите завершения текущей операции.");
+            SelectStrategyById(_runner.Current?.Id ?? _state.Config.CurrentStrategyId ?? s.Id);
+            return;
+        }
+
         _state.Config.CurrentStrategyId = s.Id;
         _state.Save();
 
-        if (_runner.IsRunning && !_busy)
+        if (_runner.IsRunning)
         {
             _busy = true;
             StartSpinner();
@@ -304,6 +327,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
                 AppendLog($"Переключение на «{s.Label}»…");
                 _startError = null;
                 await _runner.StartAsync(s);
+                _crashCount = 0;   // switched to a different strategy → fresh watchdog budget
             }
             catch (Exception ex) { ReportStartError(ex); }
             finally { _busy = false; StopSpinner(); }
@@ -341,6 +365,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         AutoPickCurrent.Text = "Подготовка…";
         AutoPickCloseBtn.Content = "Отмена";
         ShowOverlay(AutoPickPanel);
+
+        // Capture the protection in effect before autopick cycles the engine, to restore it on cancel.
+        var wasRunning = _runner.IsRunning;
+        var restoreTo = _runner.Current;
 
         _autoPickCts = new CancellationTokenSource();
         var progress = new Progress<AutoPickProgress>(p =>
@@ -384,6 +412,10 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             if (found is not null)
             {
                 SelectStrategyById(found.Id);
+                _state.Config.CurrentStrategyId = found.Id;
+                _state.Save();
+                _crashCount = 0;     // freshly-picked working strategy → fresh watchdog budget
+                RebuildProfiles();   // SelectStrategyById suppresses the combo handler, so refresh the highlight here
             }
             else
             {
@@ -394,7 +426,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             AutoPickCurrent.Text = "Отменено";
             AutoPickCloseBtn.Content = "Закрыть";
-            try { await _runner.StopAsync(); } catch { }
+            // Restore the protection the user had before autopick instead of leaving them disconnected.
+            try
+            {
+                if (wasRunning && restoreTo is not null)
+                    await _runner.StartAsync(restoreTo);
+                else
+                    await _runner.StopAsync();
+            }
+            catch { }
         }
         catch (Exception ex)
         {
@@ -737,7 +777,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         {
             var (domains, ips) = await Task.Run(() =>
             {
-                var d = CountEntries("list-general.txt") + CountEntries("list-general-user.txt") + CountEntries("list-google.txt");
+                var d = CountEntries("default.txt") + CountEntries("default-user.txt") + CountEntries("list-google.txt");
                 var i = CountEntries("ipset-all.txt") + CountEntries("ipset-user.txt");
                 return (d, i);
             });
@@ -818,6 +858,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _state.Save();
         ApplyAccent(hex);
         AccentHexBox.Text = string.Equals(hex, "system", StringComparison.OrdinalIgnoreCase) ? "" : hex;
+        RebuildProfiles();   // re-snapshot the accent into the active-profile highlight
         UpdateStatus();
     }
 
@@ -829,6 +870,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             _state.Config.AccentColor = "system";
             _state.Save();
             ApplyAccent("system");
+            RebuildProfiles();
             UpdateStatus();
             return;
         }
@@ -840,6 +882,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         _state.Config.AccentColor = hex;
         _state.Save();
         ApplyAccent(hex);
+        RebuildProfiles();
         UpdateStatus();
     }
 
@@ -1028,6 +1071,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
 
+        if (_busy)
+        {
+            // Another engine operation (connect / switch / autopick / crash-restart) is in flight;
+            // starting the test loop now would drive concurrent StartAsync/StopAsync on the runner.
+            AppendLog("Занят другой операцией — тест не запущен.");
+            return;
+        }
+
         var strategies = _catalog.Strategies.OrderBy(s => s.Label, NaturalComparer.Instance).ToList();
         if (strategies.Count == 0)
         {
@@ -1131,11 +1182,24 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (_suppressEditorSelection)
             return;
+        // Flush in-progress form edits of the previously-selected item before loading the new one,
+        // otherwise unsaved label/command changes are silently lost when switching items.
+        if (_editPrevIndex >= 0 && _editPrevIndex < _editStrategies.Count && _editPrevIndex != EditorList.SelectedIndex)
+            ApplyEditorFormTo(_editPrevIndex);
+
+        ShowEditorFormForSelection();
+        _editPrevIndex = EditorList.SelectedIndex;
+    }
+
+    private void ShowEditorFormForSelection()
+    {
         if (EditorList.SelectedItem is Strategy s)
         {
             EditorForm.IsEnabled = true;
             EditLabel.Text = s.Label;
-            EditArgs.Text = string.IsNullOrWhiteSpace(s.Command) ? CommandBuilder.ToText(s) : s.Command;
+            // null Command = legacy item not yet migrated → show the generated text; an empty array is a
+            // real (blank) command and shows blank, so browsing never rewrites it into the template.
+            EditArgs.Text = s.Command is not null ? string.Join("\n", s.Command) : CommandBuilder.ToText(s);
         }
         else
         {
@@ -1158,9 +1222,15 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         if (EditorList.SelectedItem is not Strategy s)
             return;
         var idx = EditorList.SelectedIndex;
+        // Suppress the selection handler across the remove+reselect so it can't flush the deleted item's
+        // form text into a shifted neighbor; load the new selection ourselves afterwards.
+        _suppressEditorSelection = true;
         _editStrategies.Remove(s);
-        if (_editStrategies.Count > 0)
-            EditorList.SelectedIndex = Math.Min(idx, _editStrategies.Count - 1);
+        var newIdx = _editStrategies.Count > 0 ? Math.Min(idx, _editStrategies.Count - 1) : -1;
+        EditorList.SelectedIndex = newIdx;
+        _editPrevIndex = newIdx;
+        _suppressEditorSelection = false;
+        ShowEditorFormForSelection();
     }
 
     private void EditorExport_Click(object sender, RoutedEventArgs e)
@@ -1239,6 +1309,13 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
 
     private void EditorSave_Click(object sender, RoutedEventArgs e)
     {
+        if (_catalog.LoadFailed)
+        {
+            // The strategies file couldn't be read at startup (locked); saving the in-memory (empty) list
+            // would wipe every saved strategy. Refuse until a clean reload.
+            AppendLog("Стратегии не были загружены (файл занят) — сохранение отменено, перезапустите программу.");
+            return;
+        }
         ApplyEditorForm();
         try
         {
@@ -1253,19 +1330,29 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         }
     }
 
-    private void ApplyEditorForm()
+    private void ApplyEditorForm() => ApplyEditorFormTo(EditorList.SelectedIndex);
+
+    private void ApplyEditorFormTo(int idx)
     {
-        var idx = EditorList.SelectedIndex;
-        if (idx < 0)
+        if (idx < 0 || idx >= _editStrategies.Count)
             return;
 
         var cur = _editStrategies[idx];
         var label = string.IsNullOrWhiteSpace(EditLabel.Text) ? "Без названия" : EditLabel.Text.Trim();
-        var updated = cur with { Label = label, Command = EditArgs.Text.Trim() };
+        var cmdText = EditArgs.Text.Replace("\r\n", "\n").TrimEnd();
+        var updated = cur with
+        {
+            Label = label,
+            Command = cmdText.Length == 0 ? Array.Empty<string>() : cmdText.Split('\n'),
+            Dg = null,
+            Dgen = null,
+        };
 
+        var wasSelected = EditorList.SelectedIndex == idx;
         _suppressEditorSelection = true;
         _editStrategies[idx] = updated;
-        EditorList.SelectedIndex = idx;
+        if (wasSelected)
+            EditorList.SelectedIndex = idx;
         _suppressEditorSelection = false;
     }
 
@@ -1426,8 +1513,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         var order = _state.Config.DashboardCards;
         DashCards.Children.Clear();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in order)
         {
+            // A duplicate key (corrupted / hand-edited state.json) would re-add the same singleton
+            // Border twice — WPF throws "already the logical child of another element" and the
+            // window fails to construct. Skip repeats defensively.
+            if (!seen.Add(key))
+                continue;
             var card = CardFor(key);
             if (card is null)
                 continue;
@@ -1668,6 +1761,9 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private void Exit_Click(object sender, RoutedEventArgs e)
     {
         _reallyExit = true;
+        // Cancel any in-flight test/autopick loop so it can't relaunch the engine after teardown.
+        try { _testCts?.Cancel(); } catch { }
+        try { _autoPickCts?.Cancel(); } catch { }
         try { _runner.Dispose(); } catch { }
         try { Tray.Dispose(); } catch { }
         Application.Current.Shutdown();
@@ -1931,9 +2027,14 @@ internal sealed class NaturalComparer : IComparer<string>
                 int si = i, sj = j;
                 while (i < a.Length && char.IsDigit(a[i])) i++;
                 while (j < b.Length && char.IsDigit(b[j])) j++;
-                var na = long.Parse(a.AsSpan(si, i - si));
-                var nb = long.Parse(b.AsSpan(sj, j - sj));
-                if (na != nb) return na.CompareTo(nb);
+                // Compare digit runs without parsing (long.Parse overflows on >19-digit labels and would
+                // throw out of the sort — even in the constructor, failing app startup). After stripping
+                // leading zeros, the longer run is the larger number; equal length → ordinal == numeric.
+                var da = a.AsSpan(si, i - si).TrimStart('0');
+                var db = b.AsSpan(sj, j - sj).TrimStart('0');
+                if (da.Length != db.Length) return da.Length - db.Length;
+                var dc = da.SequenceCompareTo(db);
+                if (dc != 0) return dc;
             }
             else
             {

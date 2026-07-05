@@ -10,6 +10,9 @@ public sealed class WinwsRunner : IDisposable
     private Process? _process;
     private TimeSpan _lastCpuTotal;
     private long _lastCpuTick;
+    private DateTime? _startedAt;
+    private Task _driverRemoval = Task.CompletedTask;
+    private volatile bool _disposed;
 
     public WinwsRunner(AppPaths paths) => _paths = paths;
 
@@ -20,7 +23,13 @@ public sealed class WinwsRunner : IDisposable
 
     public Strategy? Current { get; private set; }
 
-    public DateTime? StartedAt { get; private set; }
+    // Nullable<DateTime> is not read/written atomically; guard it against a torn cross-thread read
+    // (OnExited writes on the threadpool while the uptime timer reads on the UI thread).
+    public DateTime? StartedAt
+    {
+        get { lock (_gate) { return _startedAt; } }
+        private set { lock (_gate) { _startedAt = value; } }
+    }
 
     public event EventHandler? StateChanged;
 
@@ -31,6 +40,9 @@ public sealed class WinwsRunner : IDisposable
 
     public async Task StartAsync(Strategy strategy, CancellationToken ct = default)
     {
+        if (_disposed)
+            return;   // app is shutting down — a late crash-restart/test tick must not relaunch the engine
+
         if (IsRunning)
             await StopAsync(ct).ConfigureAwait(false);
 
@@ -41,6 +53,15 @@ public sealed class WinwsRunner : IDisposable
 
         KillStrayEngines();
         await EnableTcpTimestampsAsync().ConfigureAwait(false);
+
+        // Wait out any WinDivert teardown still running from a previous stop/crash before we
+        // launch the new engine (which loads the WinDivert driver). Otherwise a slow
+        // `sc delete WinDivert` from the old teardown could delete the driver this engine just
+        // loaded and kill it — spawning a crash-restart loop. Read under the gate: the field is
+        // reassigned from both the UI thread (StopAsync) and the threadpool (OnExited).
+        Task pendingRemoval;
+        lock (_gate) { pendingRemoval = _driverRemoval; }
+        await pendingRemoval.ConfigureAwait(false);
 
         var args = CommandParser.ForStrategy(_paths, strategy);
 
@@ -94,8 +115,7 @@ public sealed class WinwsRunner : IDisposable
         }
 
         StartedAt = DateTime.Now;
-        _lastCpuTick = 0;
-        _lastCpuTotal = TimeSpan.Zero;
+        lock (_gate) { _lastCpuTick = 0; _lastCpuTotal = TimeSpan.Zero; }
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -155,7 +175,7 @@ public sealed class WinwsRunner : IDisposable
 
         Current = null;
         StartedAt = null;
-        await RemoveDriverAsync().ConfigureAwait(false);
+        await RemoveDriverChained().ConfigureAwait(false);
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -183,7 +203,9 @@ public sealed class WinwsRunner : IDisposable
         }
         StartedAt = null;
         StateChanged?.Invoke(this, EventArgs.Empty);
-        _ = RemoveDriverAsync();
+        // Chain (never overwrite) the teardown so the crash-recovery StartAsync awaits it and won't
+        // delete the WinDivert driver the restarted engine just loaded.
+        RemoveDriverChained();
         if (crashed is not null)
             Crashed?.Invoke(this, crashed);
     }
@@ -208,6 +230,25 @@ public sealed class WinwsRunner : IDisposable
         await RunQuietAsync("sc", "delete", "WinDivert").ConfigureAwait(false);
     }
 
+    // Serialize WinDivert teardowns: each removal chains after the previous one and replaces the
+    // tracked task under the gate, so a crash-teardown racing a Stop-teardown never leaves one
+    // untracked (which the next StartAsync could then fail to await).
+    private Task RemoveDriverChained()
+    {
+        lock (_gate)
+        {
+            _driverRemoval = RemoveAfter(_driverRemoval);
+            return _driverRemoval;
+        }
+    }
+
+    private static async Task RemoveAfter(Task previous)
+    {
+        try { await previous.ConfigureAwait(false); }
+        catch { }
+        await RemoveDriverAsync().ConfigureAwait(false);
+    }
+
     // Fire a short-lived hidden CLI command, discard its output, never throw. Bounded so a
     // stuck sc/netsh can't hang engine start/stop.
     private static async Task RunQuietAsync(string exe, params string[] args)
@@ -226,6 +267,7 @@ public sealed class WinwsRunner : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;   // block any late StartAsync (pending crash-restart / test tick) from relaunching after teardown
         // Bounded: never hang the UI thread on exit if the WinDivert teardown stalls.
         try { StopAsync().Wait(TimeSpan.FromSeconds(5)); }
         catch { }

@@ -5,16 +5,45 @@ namespace Zapret.Core;
 public static class CommandParser
 {
     public static IReadOnlyList<string> ForStrategy(AppPaths paths, Strategy s) =>
-        Parse(paths, string.IsNullOrWhiteSpace(s.Command) ? CommandBuilder.ToText(s) : s.Command);
+        Parse(paths, s.Command is { Length: > 0 }
+            ? string.Join("\n", s.Command)          // strategy is a full command (array of lines), like a .bat
+            : CommandBuilder.ToText(s));             // legacy fallback (old Dg/Dgen strategies not yet migrated)
 
     public static IReadOnlyList<string> Parse(AppPaths paths, string? command)
     {
-        var joined = string.Join(" ", (command ?? "")
+        var lines = (command ?? "")
             .Replace("\r\n", "\n").Replace('\r', '\n')
             .Split('\n')
             .Select(l => l.Trim())
-            .Select(l => l.EndsWith('^') ? l[..^1].TrimEnd() : l)
-            .Where(l => l.Length > 0));
+            // The editor greys out '#'/'::' lines as comments; drop them so they aren't passed to winws2.
+            .Where(l => l.Length > 0 && !l.StartsWith('#') && !l.StartsWith("::"))
+            .ToList();
+
+        // Assemble the command honoring '^' line-continuation (cmd.exe semantics): a line ending in '^'
+        // joins to the next with NO inserted separator, so a token split mid-way across a caret is kept
+        // whole (e.g. "...quic_google:^" + "repeats=6" → "...quic_google:repeats=6").
+        var sb = new StringBuilder();
+        for (var k = 0; k < lines.Count; k++)
+        {
+            var l = lines[k];
+            if (l.EndsWith('^'))
+            {
+                sb.Append(l, 0, l.Length - 1);
+            }
+            else
+            {
+                sb.Append(l);
+                if (k < lines.Count - 1)
+                    sb.Append(' ');
+            }
+        }
+        var joined = sb.ToString();
+
+        // An odd number of quotes means an unterminated "…" that would swallow subsequent arguments into
+        // one giant token and silently corrupt the whole arg list. Fail loudly so the real cause is clear.
+        if (joined.Count(c => c == '"') % 2 != 0)
+            throw new InvalidOperationException(
+                "В команде непарная кавычка (\") — проверьте пути в кавычках.");
 
         var tokens = Tokenize(joined);
 

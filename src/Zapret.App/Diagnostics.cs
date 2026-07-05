@@ -216,8 +216,23 @@ public static class Diagnostics
             using var p = Process.Start(psi);
             if (p is null)
                 return "";
-            var o = p.StandardOutput.ReadToEnd();
-            p.WaitForExit(8000);
+            // Read BOTH streams asynchronously and gate on WaitForExit, not on ReadToEnd: a blocking
+            // stdout read would never return for a hung child, so the timeout-kill below would be
+            // unreachable and the whole call would hang. Draining both also avoids a pipe-buffer deadlock.
+            var outTask = p.StandardOutput.ReadToEndAsync();
+            var errTask = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(8000))
+            {
+                // A genuinely stuck child (e.g. a hung reg query) is otherwise orphaned by `using` —
+                // Process.Dispose does not kill it. Killing it closes the pipes so the reads complete.
+                try { p.Kill(entireProcessTree: true); }
+                catch { }
+            }
+            var o = "";
+            try { if (outTask.Wait(2000)) o = outTask.Result; }
+            catch { }
+            try { errTask.Wait(1000); }
+            catch { }
             return o;
         }
         catch { return ""; }

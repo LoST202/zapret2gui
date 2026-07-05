@@ -72,6 +72,10 @@ public partial class MainWindow
 
     private void ShowCompletion()
     {
+        // Ctrl+Space reaches here without the TextEntered guard; don't orphan an already-open window.
+        if (_completion is not null)
+            return;
+
         var ctx = ComputeCompletion();
         if (ctx is null)
             return;

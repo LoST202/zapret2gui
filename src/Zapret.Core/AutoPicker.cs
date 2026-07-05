@@ -93,7 +93,11 @@ public sealed class AutoPicker
             {
                 using var resp = await http.GetAsync(target, HttpCompletionOption.ResponseHeadersRead, probeCts.Token)
                     .ConfigureAwait(false);
-                // Any HTTP response means the TLS handshake to the blocked host went through → bypass works.
+                // A completed handshake usually means the bypass works — BUT a DPI box often finishes the
+                // handshake and then injects a 403/451 block page. Treat those as "still blocked" (matching
+                // RestrictionTester) and try the next target instead of declaring victory.
+                if ((int)resp.StatusCode is 403 or 451)
+                    continue;
                 return true;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)

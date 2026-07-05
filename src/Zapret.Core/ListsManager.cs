@@ -10,9 +10,9 @@ public static class ListsManager
 {
     private static readonly string[] RequiredLists =
     {
-        "list-general.txt", "list-general-user.txt", "list-google.txt",
+        "default.txt", "default-user.txt", "list-google.txt",
         "list-exclude.txt", "list-exclude-user.txt",
-        "ipset-all.txt", "ipset-exclude.txt", "ipset-exclude-user.txt",
+        "ipset-all.txt", "ipset-user.txt", "ipset-exclude.txt", "ipset-exclude-user.txt",
     };
 
     public static bool IsIpsetFile(string fileName) =>
@@ -85,10 +85,15 @@ public static class ListsManager
             return false;
         var slash = s.IndexOf('/');
         var addr = slash >= 0 ? s[..slash] : s;
-        if (!IPAddress.TryParse(addr, out _))
+        if (!IPAddress.TryParse(addr, out var ip))
             return false;
-        if (slash >= 0 && (!int.TryParse(s[(slash + 1)..], out var mask) || mask < 0 || mask > 128))
-            return false;
+        if (slash >= 0)
+        {
+            // Prefix length is family-specific: IPv4 tops out at /32, IPv6 at /128.
+            var maxMask = ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 ? 128 : 32;
+            if (!int.TryParse(s[(slash + 1)..], out var mask) || mask < 0 || mask > maxMask)
+                return false;
+        }
         return true;
     }
 
