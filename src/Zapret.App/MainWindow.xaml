@@ -451,7 +451,10 @@
               <ui:Button Content="Создать" Icon="{ui:SymbolIcon DocumentAdd24}" Margin="0,4,8,4"
                          Click="CreateListFile_Click" />
               <ui:Button Content="Обновить IP" Icon="{ui:SymbolIcon ArrowClockwise24}" Margin="0,4,8,4"
-                         ToolTip="Скачать свежий ipset-all.txt" Click="Update_Click" />
+                         ToolTip="Быстро скачать готовый ipset-all.txt из репозитория Flowseal" Click="Update_Click" />
+              <ui:Button Content="Собрать из ASN" Icon="{ui:SymbolIcon Globe24}" Margin="0,4,8,4"
+                         ToolTip="Собрать ipset-all.txt из RIPE по ASN провайдеров (~30 с, автономно)"
+                         Click="BuildIpsetFromAsn_Click" />
               <ui:Button Content="Экспорт выбранных" Icon="{ui:SymbolIcon ArrowExport24}" Margin="0,4,8,4"
                          Click="ExportSelected_Click" />
               <ui:Button Content="Удалить выбранные" Icon="{ui:SymbolIcon Delete24}" Margin="0,4,0,4"
@@ -954,6 +957,69 @@
           </ScrollViewer>
           <ui:Button x:Name="AutoPickCloseBtn" Content="Отмена" HorizontalAlignment="Right"
                      Margin="0,14,0,0" Click="AutoPickClose_Click" />
+        </StackPanel>
+      </Border>
+
+      <Border x:Name="IpsetBuildPanel" Visibility="Collapsed"
+              Width="460" VerticalAlignment="Center" HorizontalAlignment="Center"
+              Padding="18" CornerRadius="12"
+              Background="{DynamicResource ApplicationBackgroundBrush}"
+              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+        <StackPanel>
+          <TextBlock Text="Сборка IP-сета (RIPE)" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4"
+                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+          <TextBlock Text="Скачиваю анонсируемые подсети по ASN провайдеров и собираю ipset-all.txt."
+                     Margin="0,0,0,12" FontSize="12" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+          <StackPanel x:Name="IpsetConfigSection">
+            <TextBlock Text="Какие адреса собрать" FontWeight="SemiBold" Margin="0,0,0,6"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            <StackPanel Orientation="Horizontal">
+              <RadioButton x:Name="FamilyBoth" Content="IPv4 + IPv6" GroupName="ipfam" IsChecked="True" Margin="0,0,16,0" />
+              <RadioButton x:Name="FamilyV4" Content="Только IPv4" GroupName="ipfam" Margin="0,0,16,0" />
+              <RadioButton x:Name="FamilyV6" Content="Только IPv6" GroupName="ipfam" />
+            </StackPanel>
+            <Grid Margin="0,14,0,0">
+              <TextBlock x:Name="AsnCountText" VerticalAlignment="Center" FontSize="12"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+              <ui:Button Content="Изменить список ASN…" Icon="{ui:SymbolIcon Edit24}"
+                         HorizontalAlignment="Right" Click="EditAsn_Click" />
+            </Grid>
+          </StackPanel>
+
+          <StackPanel x:Name="IpsetProgressSection" Visibility="Collapsed">
+            <TextBlock x:Name="IpsetBuildCurrent" Text="Подготовка…" Margin="0,0,0,8"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <ProgressBar x:Name="IpsetBuildBar" Height="6" Minimum="0" Maximum="100" Value="0" />
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <ui:Button x:Name="IpsetBuildCloseBtn" Content="Отмена" Margin="0,0,8,0" Click="IpsetBuildClose_Click" />
+            <ui:Button x:Name="IpsetStartBtn" Content="Начать" Appearance="Primary" Click="IpsetStart_Click" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <Border x:Name="AsnEditPanel" Visibility="Collapsed"
+              Width="560" VerticalAlignment="Center" HorizontalAlignment="Center"
+              Padding="18" CornerRadius="12"
+              Background="{DynamicResource ApplicationBackgroundBrush}"
+              BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+        <StackPanel>
+          <TextBlock Text="Список ASN" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4"
+                     Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+          <TextBlock Text="Один ASN на строку: «AS12345 Название». Строки с # — комментарии. Пустой список вернёт стандартный."
+                     Margin="0,0,0,12" FontSize="12" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          <TextBox x:Name="AsnEditBox" AcceptsReturn="True" AcceptsTab="False" Height="320"
+                   FontFamily="Consolas" TextWrapping="NoWrap"
+                   VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" />
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <ui:Button Content="Сбросить" Margin="0,0,8,0" Click="AsnReset_Click" />
+            <ui:Button Content="Отмена" Margin="0,0,8,0" Click="AsnCancel_Click" />
+            <ui:Button Content="Сохранить" Appearance="Primary" Click="AsnSave_Click" />
+          </StackPanel>
         </StackPanel>
       </Border>
 

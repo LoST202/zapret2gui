@@ -36,6 +36,7 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     private bool _busy;
     private string? _startError;
     private CancellationTokenSource? _autoPickCts;
+    private CancellationTokenSource? _ipsetCts;
     private readonly DispatcherTimer _uptimeTimer;
 
     private readonly LinkedList<string> _logLines = new();
@@ -461,6 +462,154 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
             return;
         }
         HideOverlays();
+    }
+
+    // "Собрать из ASN" — open the build dialog in its configuration state (choose family / edit ASNs).
+    // Rebuilds lists/ipset-all.txt from the announced prefixes of the curated ASNs (RIPEstat) instead
+    // of downloading a prebuilt file: slower (~30 s) but autonomous and always current.
+    private void BuildIpsetFromAsn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ipsetCts is not null)
+            return;
+
+        var family = IpsetUpdater.ParseFamily(_state.Config.IpsetFamily);
+        FamilyV4.IsChecked = family == IpFamily.V4;
+        FamilyV6.IsChecked = family == IpFamily.V6;
+        FamilyBoth.IsChecked = family == IpFamily.Both;
+        AsnCountText.Text = $"В списке: {IpsetUpdater.LoadProviders(_paths).Count} ASN";
+
+        IpsetConfigSection.Visibility = Visibility.Visible;
+        IpsetProgressSection.Visibility = Visibility.Collapsed;
+        IpsetStartBtn.Visibility = Visibility.Visible;
+        IpsetBuildCloseBtn.Content = "Отмена";
+        ShowOverlay(IpsetBuildPanel);
+    }
+
+    private async void IpsetStart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ipsetCts is not null)
+            return;
+
+        var family = FamilyV4.IsChecked == true ? IpFamily.V4
+                   : FamilyV6.IsChecked == true ? IpFamily.V6
+                   : IpFamily.Both;
+        _state.Config.IpsetFamily = family switch { IpFamily.V4 => "v4", IpFamily.V6 => "v6", _ => "both" };
+        _state.Save();
+
+        IpsetConfigSection.Visibility = Visibility.Collapsed;
+        IpsetProgressSection.Visibility = Visibility.Visible;
+        IpsetStartBtn.Visibility = Visibility.Collapsed;
+        IpsetBuildBar.Value = 0;
+        IpsetBuildCurrent.Text = "Подготовка…";
+
+        _ipsetCts = new CancellationTokenSource();
+        var progress = new Progress<IpsetUpdateProgress>(p =>
+        {
+            IpsetBuildBar.Maximum = Math.Max(1, p.Total);
+            IpsetBuildBar.Value = p.Done;
+            IpsetBuildCurrent.Text = $"{p.Done}/{p.Total} · {p.Provider}";
+        });
+
+        try
+        {
+            var result = await IpsetUpdater.RunAsync(_paths, family, progress, _ipsetCts.Token);
+            var total = result.V4Count + result.V6Count;
+            if (result.Written)
+            {
+                IpsetBuildCurrent.Text = $"Готово · +{result.Added:N0} / −{result.Removed:N0} · итого {total:N0}";
+                LoadListsPage();
+                UpdateListCounts();
+                ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Success;
+                ListsInfoBar.Title = "IP-сет собран из RIPE";
+                ListsInfoBar.Message =
+                    $"Добавлено {result.Added:N0}, удалено {result.Removed:N0}. " +
+                    $"Итого: IPv4 {result.V4Count:N0}, IPv6 {result.V6Count:N0} " +
+                    $"({result.AsnOk}/{result.AsnOk + result.AsnFailed} ASN). Применится при следующем подключении.";
+                ListsInfoBar.IsOpen = true;
+                AppendLog($"IP-сет собран из RIPE: +{result.Added} / −{result.Removed}, итого {total} ({result.AsnOk} ASN).");
+            }
+            else
+            {
+                IpsetBuildCurrent.Text = "Не удалось собрать";
+                ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Error;
+                ListsInfoBar.Title = "Сборка не удалась";
+                ListsInfoBar.Message = result.Error ?? "неизвестная ошибка";
+                ListsInfoBar.IsOpen = true;
+                AppendLog("Сборка IP-сета: " + (result.Error ?? "ошибка"));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            IpsetBuildCurrent.Text = "Отменено";
+        }
+        catch (Exception ex)
+        {
+            IpsetBuildCurrent.Text = "Ошибка: " + ex.Message;
+            AppendLog("Сборка IP-сета: " + ex.Message);
+        }
+        finally
+        {
+            _ipsetCts?.Dispose();
+            _ipsetCts = null;
+            IpsetBuildCloseBtn.Content = "Закрыть";
+            _ = Task.Run(MemoryTrimmer.Trim); // return the fetch/aggregate spike to the OS
+        }
+    }
+
+    private void IpsetBuildClose_Click(object sender, RoutedEventArgs e)
+    {
+        if (_ipsetCts is { IsCancellationRequested: false } cts)
+        {
+            cts.Cancel();
+            return;
+        }
+        HideOverlays();
+    }
+
+    // ===== ASN list editor (swaps in over the build dialog) =====
+
+    private void EditAsn_Click(object sender, RoutedEventArgs e)
+    {
+        AsnEditBox.Text = LoadAsnEditorText();
+        IpsetBuildPanel.Visibility = Visibility.Collapsed;
+        AsnEditPanel.Visibility = Visibility.Visible;
+    }
+
+    private string LoadAsnEditorText()
+    {
+        var file = IpsetUpdater.AsnFile(_paths);
+        if (File.Exists(file))
+        {
+            try { return File.ReadAllText(file); } catch { }
+        }
+        return DefaultAsnText();
+    }
+
+    private static string DefaultAsnText() =>
+        "# Один ASN на строку: AS12345 Название. Строки с # — комментарии.\n" +
+        "# Пустой список вернёт стандартный набор провайдеров.\n\n" +
+        IpsetUpdater.FormatProviders(IpsetUpdater.Providers);
+
+    private void AsnReset_Click(object sender, RoutedEventArgs e) => AsnEditBox.Text = DefaultAsnText();
+
+    private void AsnCancel_Click(object sender, RoutedEventArgs e)
+    {
+        AsnEditPanel.Visibility = Visibility.Collapsed;
+        IpsetBuildPanel.Visibility = Visibility.Visible;
+    }
+
+    private void AsnSave_Click(object sender, RoutedEventArgs e)
+    {
+        var count = IpsetUpdater.SaveProviders(_paths, AsnEditBox.Text);
+        AsnCountText.Text = $"В списке: {(count == 0 ? IpsetUpdater.Providers.Length : count)} ASN";
+        AsnEditPanel.Visibility = Visibility.Collapsed;
+        IpsetBuildPanel.Visibility = Visibility.Visible;
+        ListsInfoBar.Severity = Wpf.Ui.Controls.InfoBarSeverity.Informational;
+        ListsInfoBar.Title = "Список ASN сохранён";
+        ListsInfoBar.Message = count == 0
+            ? "Список очищен — используется стандартный набор."
+            : $"{count} ASN в списке.";
+        ListsInfoBar.IsOpen = true;
     }
 
     private List<ListFileVm> _listVms = new();
@@ -1702,9 +1851,14 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
     {
         if (!ReferenceEquals(e.OriginalSource, Scrim))
             return;
-        if (_autoPickCts is { IsCancellationRequested: false } cts)
+        if (_autoPickCts is { IsCancellationRequested: false } apCts)
         {
-            cts.Cancel();
+            apCts.Cancel();
+            return;
+        }
+        if (_ipsetCts is { IsCancellationRequested: false } ipCts)
+        {
+            ipCts.Cancel();
             return;
         }
         HideOverlays();
@@ -1724,6 +1878,8 @@ public partial class MainWindow : Wpf.Ui.Controls.FluentWindow
         Scrim.Opacity = 1;
         Scrim.Visibility = Visibility.Collapsed;
         AutoPickPanel.Visibility = Visibility.Collapsed;
+        IpsetBuildPanel.Visibility = Visibility.Collapsed;
+        AsnEditPanel.Visibility = Visibility.Collapsed;
         ProfileNamePanel.Visibility = Visibility.Collapsed;
         DashCustomizePanel.Visibility = Visibility.Collapsed;
     }

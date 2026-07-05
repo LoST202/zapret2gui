@@ -76,6 +76,9 @@ public sealed class AppConfig
     public double FontSize { get; set; }
 
     public Dictionary<string, string> ListNotes { get; set; } = new();
+
+    /// <summary>Which IP families "Собрать из ASN" writes into ipset-all.txt: "both" | "v4" | "v6".</summary>
+    public string IpsetFamily { get; set; } = "both";
 }
 
 [JsonSourceGenerationOptions(
